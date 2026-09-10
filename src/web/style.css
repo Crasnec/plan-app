@@ -1725,3 +1725,17 @@ nav button.active {
   padding: 4px;
   overflow: hidden;
 }
+.sidebar[hidden] {
+  display: none;
+}
+.sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+@media (max-width: 700px) {
+  .sidebar-toggle {
+    display: none;
+  }
+}
