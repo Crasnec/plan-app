@@ -1,0 +1,34 @@
+services:
+  plan-app:
+    build: .
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_PATH: /app/data/plan.sqlite
+      PORT: 3000
+    volumes:
+      - plan-data:/app/data
+      - plan-backups:/app/backups
+    networks:
+      - caddy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  caddy:
+    external: true
+    name: ${CADDY_NETWORK:-caddy}
+volumes:
+  plan-data:
+  plan-backups:
