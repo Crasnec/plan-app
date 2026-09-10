@@ -302,6 +302,28 @@ try {
       "Long content must stay inside card",
     );
   }
+  const crowdedDay = target(koreanToday);
+  const more = crowdedDay.getByRole("button", { name: /개 더 보기/ });
+  await more.waitFor();
+  assert.equal(await crowdedDay.locator(".calendar-event").count(), 3);
+  await more.click();
+  assert((await crowdedDay.locator(".calendar-event").count()) > 3);
+  assert.equal(
+    await crowdedDay
+      .getByRole("button", { name: "접기", exact: true })
+      .getAttribute("aria-expanded"),
+    "true",
+  );
+  await crowdedDay.locator(".calendar-event button").last().click();
+  await page.getByRole("dialog").waitFor();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await crowdedDay.getByRole("button", { name: "접기", exact: true }).click();
+  assert.equal(await crowdedDay.locator(".calendar-event").count(), 3);
+  await more.click();
+  assert((await crowdedDay.locator(".calendar-event").count()) > 3);
+  await page.getByRole("button", { name: "다음 기간", exact: true }).click();
+  await page.getByRole("button", { name: "이전 기간", exact: true }).click();
+  assert.equal(await crowdedDay.locator(".calendar-event").count(), 3);
   assert.deepEqual(errors, []);
   console.log(
     "Browser smoke passed: desktop/mobile, create/complete/delete/restore, drag/resize, cross-tab sync, day/week/month, shared privacy/revocation, overlap layout, monthly last weekday, non-Korean browser timezone.",
