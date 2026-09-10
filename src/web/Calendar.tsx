@@ -49,11 +49,18 @@ export function Calendar({
   const [dragging, setDragging] = useState<{
     id: string;
     resize: boolean;
+    offset: number;
+    anchor: number;
+  } | null>(null);
+  const [timeTarget, setTimeTarget] = useState<{
+    date: string;
+    minute: number;
   } | null>(null);
   const [dropDate, setDropDate] = useState<string | null>(null);
   const resetDrag = () => {
     setDragging(null);
     setDropDate(null);
+    setTimeTarget(null);
   };
   useEffect(() => {
     window.addEventListener("dragend", resetDrag);
@@ -79,7 +86,16 @@ export function Calendar({
       return;
     }
     ev.stopPropagation();
-    setDragging({ id: e.id, resize });
+    const block = (ev.currentTarget as HTMLElement).closest<HTMLElement>(
+      ".time-event",
+    );
+    setDragging({
+      id: e.id,
+      resize,
+      offset:
+        block && !resize ? ev.clientY - block.getBoundingClientRect().top : 0,
+      anchor: block ? Number.parseFloat(block.style.top) : 0,
+    });
     setDropDate(null);
     ev.dataTransfer.setData(
       "application/plan",
@@ -87,6 +103,34 @@ export function Calendar({
     );
     ev.dataTransfer.effectAllowed = "move";
   };
+  const targetMinute = (ev: React.DragEvent<HTMLDivElement>) => {
+    const position = ev.clientY - ev.currentTarget.getBoundingClientRect().top;
+    if (dragging && !dragging.resize)
+      return Math.max(
+        0,
+        Math.min(
+          1439,
+          dragging.anchor +
+            Math.round((position - dragging.offset - dragging.anchor) / 30) *
+              30,
+        ),
+      );
+    return Math.max(0, Math.min(1410, Math.floor(position / 30) * 30));
+  };
+  const activeEvent = dragging && events.find((e) => e.id === dragging.id);
+  const timeAt = (d: string, minute: number) => new Date(Date.parse(toUTC(`${d}T00:00`)) + Math.round(minute * 60000)).toISOString();
+  const targetTime =
+    timeTarget &&
+    timeAt(timeTarget.date, timeTarget.minute);
+  const previewEnd =
+    targetTime && activeEvent?.kind === "timed"
+      ? new Date(
+          Date.parse(targetTime) +
+            (dragging?.resize
+              ? 30 * 60000
+              : Date.parse(activeEvent.end!) - Date.parse(activeEvent.start!)),
+        ).toISOString()
+      : null;
   const drop = (ev: React.DragEvent, d: string, minute?: number) => {
     ev.preventDefault();
     resetDrag();
@@ -106,11 +150,7 @@ export function Calendar({
           onMove(e, d, addDays(d, duration), false);
         }
       } else if (e.kind === "timed") {
-        const time =
-          minute === undefined
-            ? local(e.start!).slice(11, 16)
-            : `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
-        const target = toUTC(`${d}T${time}`);
+        const target = minute === undefined ? toUTC(`${d}T${local(e.start!).slice(11, 16)}`) : timeAt(d, minute);
         if (payload.resize) {
           const end =
             minute === undefined
@@ -314,21 +354,24 @@ export function Calendar({
               key={d}
               className="time-column"
               onDragOver={(e) => {
-                if (movable) e.preventDefault();
+                if (
+                  movable &&
+                  dragging &&
+                  e.dataTransfer.types.includes("application/plan")
+                ) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setTimeTarget({ date: d, minute: targetMinute(e) });
+                }
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                  setTimeTarget((current) =>
+                    current?.date === d ? null : current,
+                  );
               }}
               onDrop={(e) => {
-                const minute = Math.max(
-                  0,
-                  Math.min(
-                    1410,
-                    Math.floor(
-                      (e.clientY -
-                        e.currentTarget.getBoundingClientRect().top) /
-                        30,
-                    ) * 30,
-                  ),
-                );
-                drop(e, d, minute);
+                drop(e, d, targetMinute(e));
               }}
             >
               {Array.from({ length: 48 }, (_, i) => (
@@ -337,7 +380,7 @@ export function Calendar({
               {timeLayout(events, d).map((p) => (
                 <div
                   key={p.event.id}
-                  className={`time-event ${p.event.done ? "is-done" : ""}`}
+                  className={`time-event ${movable ? "is-movable" : ""} ${dragging?.id === p.event.id ? "is-dragging" : ""} ${p.event.done ? "is-done" : ""}`}
                   style={{
                     top: p.top,
                     height: Math.max(18, p.height),
@@ -347,7 +390,14 @@ export function Calendar({
                   draggable={movable}
                   onDragStart={(e) => startDrag(e, p.event)}
                 >
-                  <button onClick={() => onOpen(p.event)}>
+                  <button
+                    draggable={movable}
+                    onDragStart={(e) => startDrag(e, p.event)}
+                    title="끌어서 시간 이동 · 클릭해서 열기"
+                    onClick={() => {
+                      if (!dragging) onOpen(p.event);
+                    }}
+                  >
                     <strong>{p.event.title}</strong>
                     <span>
                       {local(p.event.start!).slice(11, 16)}–
@@ -364,6 +414,30 @@ export function Calendar({
                   )}
                 </div>
               ))}
+              {timeTarget?.date === d && targetTime && previewEnd && (
+                <div
+                  className="time-drop-preview"
+                  role="status"
+                  style={{
+                    top: timeTarget.minute,
+                    height: Math.max(
+                      30,
+                      Math.min(
+                        1440 - timeTarget.minute,
+                        dragging?.resize
+                          ? 30
+                          : (Date.parse(previewEnd) - Date.parse(targetTime)) /
+                              60000,
+                      ),
+                    ),
+                  }}
+                >
+                  {dragging?.resize ? "종료 " : "이동 "}
+                  {dragging?.resize
+                    ? local(previewEnd).slice(11, 16)
+                    : `${local(targetTime).slice(11, 16)}–${local(previewEnd).slice(11, 16)}`}
+                </div>
+              )}
             </div>
           ))}
         </div>

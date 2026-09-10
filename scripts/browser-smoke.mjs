@@ -245,11 +245,54 @@ try {
     "50%",
   );
   await page.screenshot({ path: "artifacts/desktop-week.png", fullPage: true });
+  const dragTime = async (delta, expected) => {
+    const block = page
+      .locator(".time-event")
+      .filter({ hasText: "집중해서 프로젝트 정리" })
+      .first();
+    const box = await block.getByRole("button").boundingBox();
+    assert(box);
+    const before = changes;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 10, box.y + box.height / 2, {
+      steps: 5,
+    });
+    await page.mouse.move(
+      box.x + box.width / 2,
+      box.y + box.height / 2 + delta,
+      { steps: 12 },
+    );
+    await page.mouse.move(
+      box.x + box.width / 2 + 1,
+      box.y + box.height / 2 + delta,
+    );
+    await page.locator(".time-drop-preview").waitFor();
+    assert.match(
+      await page.locator(".time-drop-preview").textContent(),
+      new RegExp(expected),
+    );
+    await page.mouse.up();
+    await page.waitForFunction(
+      ({ expected }) =>
+        [...document.querySelectorAll(".time-event button")].some(
+          (e) =>
+            e.textContent.includes("집중해서 프로젝트 정리") &&
+            e.textContent.includes(expected),
+        ),
+      { expected },
+    );
+    assert.equal(changes, before + (delta ? 1 : 0));
+    assert.equal(await page.locator(".time-drop-preview").count(), 0);
+  };
+  await dragTime(0, "10:00");
+  await dragTime(60, "11:00");
   await page
     .locator(".view-switch")
     .getByRole("button", { name: "일", exact: true })
     .click();
   assert.equal(await page.locator(".time-column").count(), 1);
+  await dragTime(-60, "10:00");
   await page
     .locator(".view-switch")
     .getByRole("button", { name: "주", exact: true })
