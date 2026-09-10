@@ -135,6 +135,28 @@ try {
     page.locator(".day-cell").filter({
       has: page.getByRole("button", { name: `${d} 선택`, exact: true }),
     });
+  let changes = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      /\/api\/items\/[^/]+\/change$/.test(new URL(request.url()).pathname)
+    )
+      changes++;
+  });
+  await source().dragTo(target(koreanToday));
+  assert.equal(
+    changes,
+    0,
+    "Dropping on the same date must not send a change request",
+  );
+  await source().getByRole("button").click();
+  await page.getByRole("button", { name: "저장하기", exact: true }).click();
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
+  assert.equal(
+    changes,
+    0,
+    "Saving unchanged fields must not send a change request",
+  );
   const grab = await source().getByRole("button").boundingBox();
   const destination = await target(tomorrow).boundingBox();
   assert(grab && destination);
@@ -166,6 +188,7 @@ try {
     .locator(".task-card")
     .filter({ hasText: "브라우저 확인 일정" })
     .waitFor({ state: "hidden" });
+  assert.equal(changes, 1, "A real move must still send one change request");
   await source().dragTo(target(koreanToday));
   await page
     .locator(".task-card")
@@ -349,6 +372,7 @@ try {
   assert((await crowdedDay.locator(".calendar-event").count()) > 3);
   await page.getByRole("button", { name: "다음 기간", exact: true }).click();
   await page.getByRole("button", { name: "이전 기간", exact: true }).click();
+  await crowdedDay.locator(".calendar-event").first().waitFor();
   assert.equal(await crowdedDay.locator(".calendar-event").count(), 3);
   assert.deepEqual(errors, []);
   console.log(

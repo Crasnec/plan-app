@@ -171,6 +171,7 @@ function App() {
     scope: Scope,
     deleting = false,
   ) {
+    if (!deleting && sameFields(event, fields)) return;
     await api(`/items/${event.itemId}/change`, {
       key: event.key,
       version: event.version,
@@ -204,10 +205,12 @@ function App() {
     end: string,
     scope: Scope,
   ) {
+    if (sameSchedule(event, { ...event, start, end })) return;
     await change(event, { ...event, start, end }, scope);
     setNotice("일정을 옮겼습니다.");
   }
   function onMove(event: Occurrence, start: string, end: string) {
+    if (sameSchedule(event, { ...event, start, end })) return;
     if (event.recurring) {
       setMoveScope("one");
       setMoving({ event, start, end });
@@ -661,6 +664,7 @@ function App() {
           readOnly={readOnly}
           onClose={() => setEditor(null)}
           onSave={async (f, scope) => {
+            if (editor.event && sameFields(editor.event, f)) return;
             if (editor.event) await change(editor.event, f, scope);
             else {
               await api("/items", f);
@@ -989,3 +993,4 @@ function Settings({
   );
 }
 createRoot(document.getElementById("root")!).render(<App />);
+import { sameFields, sameSchedule } from "../shared/domain.js";

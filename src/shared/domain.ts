@@ -24,6 +24,41 @@ export interface Fields {
   reminder: number | null;
   rule: Rule | null;
 }
+export function sameSchedule(
+  a: Pick<Fields, "kind" | "start" | "end">,
+  b: Pick<Fields, "kind" | "start" | "end">,
+) {
+  if (a.kind !== b.kind) return false;
+  const equal = (x: string | null, y: string | null) =>
+    x === y ||
+    (a.kind === "timed" &&
+      x !== null &&
+      y !== null &&
+      Date.parse(x) === Date.parse(y));
+  return equal(a.start, b.start) && equal(a.end, b.end);
+}
+export function sameFields(a: Fields, b: Fields) {
+  const rule = (r: Rule | null) =>
+    r && [
+      r.frequency,
+      r.interval,
+      [...new Set(r.weekdays)].sort(),
+      r.monthly,
+      r.day,
+      r.ordinal,
+      r.weekday,
+      r.until,
+    ];
+  return (
+    sameSchedule(a, b) &&
+    a.title.trim() === b.title.trim() &&
+    a.notes === b.notes &&
+    a.public === b.public &&
+    a.done === b.done &&
+    a.reminder === b.reminder &&
+    JSON.stringify(rule(a.rule)) === JSON.stringify(rule(b.rule))
+  );
+}
 export interface Item extends Fields {
   id: string;
   version: number;
