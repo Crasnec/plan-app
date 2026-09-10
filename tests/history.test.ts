@@ -109,7 +109,7 @@ test("Deleting and restoring recurring schedules can be undone; new edits clear 
     );
     assert.equal(s.list("2026-09-02", "2026-09-03").length, 0);
     const trash = s.trash()[0];
-    h.record("a", "restore", () => s.restore(trash.id));
+    h.record("a", "restore", () => s.restore(String(trash.id)));
     assert.equal(s.list("2026-09-02", "2026-09-03").length, 1);
     h.apply("a", "undo", h.state("a").undo!.id);
     assert.equal(s.list("2026-09-02", "2026-09-03").length, 0);
