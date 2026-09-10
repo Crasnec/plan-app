@@ -15,6 +15,7 @@ import { agentRouter, agentManagement } from "./agents.js";
 import type { Config } from "./config.js";
 import { validDate, dateDiff, type Scope } from "../shared/domain.js";
 import { errorPage } from "./error-page.js";
+import { History } from "./history.js";
 
 export function createApp(
   store: Store,
@@ -23,6 +24,9 @@ export function createApp(
 ) {
   const app = express();
   app.disable("x-powered-by");
+  const history = new History(store);
+  const historySession = (req: express.Request) =>
+    cfg.demo ? "demo" : hash(cookie(req, "plan_session"));
   const clients = new Map<
     Response,
     { sessionHash: string; authorized: () => boolean; close: () => void }
@@ -125,8 +129,24 @@ export function createApp(
     }
   });
   agentManagement(app, store, cfg);
+  app.use("/api/history", (req, _res, next) =>
+    req.headers.authorization
+      ? next(new HttpError(403, "되돌리기는 소유자 브라우저에서만 가능합니다."))
+      : next(),
+  );
+  app.get("/api/history", (req, res) =>
+    res.json(history.state(historySession(req))),
+  );
+  for (const direction of ["undo", "redo"] as const)
+    app.post(`/api/history/${direction}`, (req, res) => {
+      const state = history.apply(historySession(req), direction, req.body?.id);
+      broadcast();
+      res.json(state);
+    });
   app.post("/api/items", (req, res) => {
-    const item = store.create(req.body);
+    const item = history.record(historySession(req), "일정 생성", () =>
+      store.create(req.body),
+    );
     broadcast();
     res.status(201).json(item);
   });
@@ -138,20 +158,27 @@ export function createApp(
       typeof deleting !== "boolean"
     )
       throw new HttpError(400, "변경 요청을 확인해 주세요.");
-    const item = store.mutate(
-      String(req.params.id),
-      key,
-      version,
-      scope as Scope,
-      fields,
-      deleting,
+    const item = history.record(
+      historySession(req),
+      deleting ? "일정 삭제" : "일정 변경",
+      () =>
+        store.mutate(
+          String(req.params.id),
+          key,
+          version,
+          scope as Scope,
+          fields,
+          deleting,
+        ),
     );
     broadcast();
     res.json(item);
   });
   app.get("/api/trash", (_req, res) => res.json(store.trash()));
   app.post("/api/trash/:id/restore", (req, res) => {
-    store.restore(String(req.params.id));
+    history.record(historySession(req), "휴지통 복구", () =>
+      store.restore(String(req.params.id)),
+    );
     broadcast();
     res.json({ ok: true });
   });
