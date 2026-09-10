@@ -266,6 +266,42 @@ try {
   });
   await page.getByRole("button", { name: "저장하기", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "새 할 일", exact: true }).click();
+  const longTitle = "W".repeat(200);
+  await page.getByLabel("제목", { exact: true }).fill(longTitle);
+  await page
+    .getByLabel("메모", { exact: true })
+    .fill(
+      "# 메모 제목\n**강조된 내용**\n- [x] 완료\n[참고](https://example.com)\n```\n" +
+        "x".repeat(1000) +
+        "\n```\n<img src=x onerror=alert(1)>",
+    );
+  await page
+    .locator(".markdown-preview")
+    .getByRole("heading", { name: "메모 제목" })
+    .waitFor();
+  await page.getByRole("button", { name: "저장하기", exact: true }).click();
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
+  const longCard = page.locator(".task-card").filter({ hasText: longTitle });
+  await longCard.getByRole("heading", { name: "메모 제목" }).waitFor();
+  assert.equal(await longCard.locator("img").count(), 0);
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    assert(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      "Long content must not widen page",
+    );
+    assert(
+      await longCard.evaluate((el) => {
+        const card = el.getBoundingClientRect();
+        const content = el.querySelector(".task-body").getBoundingClientRect();
+        return content.right <= card.right && content.left >= card.left;
+      }),
+      "Long content must stay inside card",
+    );
+  }
   assert.deepEqual(errors, []);
   console.log(
     "Browser smoke passed: desktop/mobile, create/complete/delete/restore, drag/resize, cross-tab sync, day/week/month, shared privacy/revocation, overlap layout, monthly last weekday, non-Korean browser timezone.",

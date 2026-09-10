@@ -107,7 +107,7 @@ export function Editor({
                 ? `${start} ~ ${end} · 종일`
                 : `${start.replace("T", " ")} ~ ${end.replace("T", " ")}`}
           </p>
-          <p className="notes">{event.notes || "등록된 메모가 없습니다."}</p>
+          <Markdown text={event.notes || "등록된 메모가 없습니다."} />
         </div>
       </Modal>
     );
@@ -163,11 +163,17 @@ export function Editor({
           <textarea
             rows={3}
             maxLength={10000}
-            placeholder="기억하고 싶은 내용을 적어 보세요."
+            placeholder="메모를 적어 보세요. **강조**, 목록, 링크 등 마크다운을 사용할 수 있어요."
             value={f.notes}
             onChange={(e) => update({ notes: e.target.value })}
           />
         </label>
+        {f.notes && (
+          <details className="markdown-preview" open>
+            <summary>메모 미리보기 · 마크다운</summary>
+            <Markdown text={f.notes} />
+          </details>
+        )}
         <label>
           일정 유형
           <select
@@ -523,3 +529,4 @@ export function Editor({
     </Modal>
   );
 }
+import { Markdown } from "./Markdown.js";

@@ -1533,3 +1533,120 @@ nav button.active {
   background: #eef0e6;
   margin: 20px 0;
 }
+.workspace > *,
+.calendar-card,
+.day-cell,
+.task-list,
+.task-card,
+.detail,
+.modal form,
+.modal fieldset {
+  min-width: 0;
+  max-width: 100%;
+}
+.calendar-event,
+.event-title {
+  min-width: 0;
+  max-width: 100%;
+}
+.calendar-event {
+  overflow: hidden;
+}
+.event-title {
+  flex: 1;
+}
+.task-content p,
+.detail h3,
+.trash-list strong,
+.modal h2,
+.time-event button strong {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+.markdown {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  line-height: 1.75;
+  color: #46533f;
+  font-size: 13px;
+}
+.markdown p,
+.detail .markdown p:not(.notes) {
+  display: block;
+  margin: 8px 0;
+  white-space: pre-wrap;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 1.15em;
+  line-height: 1.5;
+  margin: 16px 0 8px;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 24px;
+}
+.markdown a {
+  color: #536f45;
+  text-decoration: underline;
+}
+.markdown code {
+  font-family: monospace;
+  background: #eef0e6;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 12px;
+  background: #eef0e6;
+  border-radius: 8px;
+  white-space: pre;
+}
+.markdown pre code {
+  padding: 0;
+}
+.markdown blockquote {
+  margin: 12px 0;
+  border-left: 3px solid #9eaf8e;
+  padding-left: 14px;
+  white-space: pre-wrap;
+}
+.markdown-preview {
+  border: 1px solid #dfe4d5;
+  padding: 12px;
+  border-radius: 10px;
+  margin: 12px 0 20px;
+  min-width: 0;
+}
+.markdown-preview summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #687260;
+}
+.task-body {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+.task-notes {
+  max-height: 9em;
+  overflow: auto;
+  margin-top: 8px;
+}
+.task-notes .markdown {
+  font-size: 11px;
+}
+.trash-item,
+.trash-item > div,
+.detail h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

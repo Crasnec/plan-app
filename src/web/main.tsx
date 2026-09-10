@@ -6,6 +6,7 @@ import { Calendar, range, type View } from "./Calendar.js";
 import { Editor } from "./Editor.js";
 import { Modal } from "./Modal.js";
 import { AgentKeys } from "./AgentKeys.js";
+import { Markdown } from "./Markdown.js";
 import {
   today,
   addDays,
@@ -578,24 +579,30 @@ function App() {
                         {e.done && <Icon name="check" size={16} />}
                       </span>
                     )}
-                    <button
-                      className="task-content"
-                      onClick={() => setEditor({ event: e, date: selected })}
-                    >
-                      <strong>{e.title}</strong>
-                      <span>
-                        {e.kind === "undated"
-                          ? "날짜 미정"
-                          : e.kind === "all_day"
-                            ? "종일"
-                            : `${local(e.start!).slice(11, 16)} – ${local(e.end!).slice(11, 16)}`}
-                        {e.recurring && <Icon name="repeat" size={13} />}
-                        <span className="visibility">
-                          {e.public ? "공개" : "나만 보기"}
+                    <div className="task-body">
+                      <button
+                        className="task-content"
+                        onClick={() => setEditor({ event: e, date: selected })}
+                      >
+                        <strong>{e.title}</strong>
+                        <span>
+                          {e.kind === "undated"
+                            ? "날짜 미정"
+                            : e.kind === "all_day"
+                              ? "종일"
+                              : `${local(e.start!).slice(11, 16)} – ${local(e.end!).slice(11, 16)}`}
+                          {e.recurring && <Icon name="repeat" size={13} />}
+                          <span className="visibility">
+                            {e.public ? "공개" : "나만 보기"}
+                          </span>
                         </span>
-                      </span>
-                      {e.notes && <p>{e.notes}</p>}
-                    </button>
+                      </button>
+                      {e.notes && (
+                        <div className="task-notes">
+                          <Markdown text={e.notes} />
+                        </div>
+                      )}
+                    </div>
                   </article>
                 ))
               ) : (

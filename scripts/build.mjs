@@ -22,7 +22,7 @@ await Promise.all([
   }),
   build({
     entryPoints: (await readdir("tests"))
-      .filter((n) => n.endsWith(".test.ts"))
+      .filter((n) => /\.test\.tsx?$/.test(n))
       .map((n) => `tests/${n}`),
     outdir: "dist/tests",
     bundle: true,
