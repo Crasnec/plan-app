@@ -1699,3 +1699,29 @@ nav button.active {
   cursor: ew-resize;
   user-select: none;
 }
+.time-event.is-movable button {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-drag: element;
+}
+.time-event.is-movable button:active {
+  cursor: grabbing;
+}
+.time-event.is-dragging {
+  opacity: 0.45;
+}
+.time-drop-preview {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  z-index: 4;
+  pointer-events: none;
+  border: 2px solid #728b60;
+  border-radius: 5px;
+  background: #dce8d4d9;
+  color: #34472c;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px;
+  overflow: hidden;
+}
