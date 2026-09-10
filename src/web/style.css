@@ -1650,3 +1650,52 @@ nav button.active {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.day-cell {
+  position: relative;
+}
+.day-cell.drop-target {
+  background: #e1ead7;
+  box-shadow: inset 0 0 0 3px #728b60;
+}
+.drop-label {
+  position: absolute;
+  z-index: 5;
+  right: 3px;
+  bottom: 3px;
+  left: 3px;
+  padding: 5px 2px;
+  border-radius: 5px;
+  background: #536f45;
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+}
+.calendar-event.is-movable button {
+  min-height: 28px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-drag: element;
+}
+.calendar-event.is-movable button:active {
+  cursor: grabbing;
+}
+.calendar-event.is-dragging {
+  opacity: 0.5;
+  outline: 1px dashed #728b60;
+}
+.calendar-event .drag-grip {
+  flex: 0 0 10px;
+  font-size: 14px !important;
+  color: #728b60;
+}
+.calendar-event.is-movable .resize-handle {
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  border-left: 1px solid #cbd7c1;
+  cursor: ew-resize;
+  user-select: none;
+}

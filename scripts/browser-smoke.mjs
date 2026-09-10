@@ -135,7 +135,33 @@ try {
     page.locator(".day-cell").filter({
       has: page.getByRole("button", { name: `${d} 선택`, exact: true }),
     });
-  await source().dragTo(target(tomorrow));
+  const grab = await source().getByRole("button").boundingBox();
+  const destination = await target(tomorrow).boundingBox();
+  assert(grab && destination);
+  await page.mouse.move(grab.x + grab.width / 2, grab.y + grab.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    grab.x + grab.width / 2 + 12,
+    grab.y + grab.height / 2,
+    { steps: 5 },
+  );
+  await page.mouse.move(
+    destination.x + destination.width / 2,
+    destination.y + destination.height / 2,
+    { steps: 12 },
+  );
+  await page.mouse.move(
+    destination.x + destination.width / 2 + 1,
+    destination.y + destination.height / 2,
+  );
+  await target(tomorrow).locator(".drop-label").waitFor();
+  assert.match(await target(tomorrow).getAttribute("class"), /drop-target/);
+  await page.screenshot({
+    path: "artifacts/drag-destination.png",
+    fullPage: true,
+  });
+  await page.mouse.up();
+  assert.equal(await page.locator(".drop-target").count(), 0);
   await page
     .locator(".task-card")
     .filter({ hasText: "브라우저 확인 일정" })
