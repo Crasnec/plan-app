@@ -55,6 +55,54 @@ try {
     path: "artifacts/desktop-month.png",
     fullPage: true,
   });
+  await page
+    .locator(".sidebar-bottom")
+    .getByRole("button", { name: "API 키 관리", exact: true })
+    .click();
+  await page.getByLabel("키 이름", { exact: true }).fill("브라우저 테스트 키");
+  await page.getByRole("button", { name: "API 키 발급", exact: true }).click();
+  const apiKey = await page
+    .getByLabel("발급된 API 키", { exact: true })
+    .inputValue();
+  assert.match(apiKey, /^plan_agent_/);
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("alert").waitFor();
+  await page.getByLabel("안전하게 저장했습니다").check();
+  await page.getByRole("button", { name: "확인", exact: true }).click();
+  assert.equal(
+    await page.getByLabel("발급된 API 키", { exact: true }).count(),
+    0,
+  );
+  const authorized = await page.request.get(`${origin}/api/agent/v1/me`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  assert.equal(authorized.status(), 200);
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .locator(".mobile-nav")
+    .getByRole("button", { name: "API 키 관리", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "브라우저 테스트 키 키 폐기", exact: true })
+    .click();
+  await page.getByRole("button", { name: "폐기하기", exact: true }).click();
+  await page.getByText("폐기됨", { exact: true }).waitFor();
+  assert.equal(
+    (
+      await page.request.get(`${origin}/api/agent/v1/me`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      })
+    ).status(),
+    401,
+  );
+  assert(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("button", { name: "새 할 일", exact: true }).click();
   await page.getByLabel("제목", { exact: true }).fill("브라우저 확인 일정");
   await page
@@ -84,11 +132,9 @@ try {
       .filter({ hasText: "브라우저 확인 일정" })
       .first();
   const target = (d) =>
-    page
-      .locator(".day-cell")
-      .filter({
-        has: page.getByRole("button", { name: `${d} 선택`, exact: true }),
-      });
+    page.locator(".day-cell").filter({
+      has: page.getByRole("button", { name: `${d} 선택`, exact: true }),
+    });
   await source().dragTo(target(tomorrow));
   await page
     .locator(".task-card")

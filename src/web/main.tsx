@@ -5,6 +5,7 @@ import { Icon } from "./icons.js";
 import { Calendar, range, type View } from "./Calendar.js";
 import { Editor } from "./Editor.js";
 import { Modal } from "./Modal.js";
+import { AgentKeys } from "./AgentKeys.js";
 import {
   today,
   addDays,
@@ -46,9 +47,9 @@ function App() {
       event: Occurrence | null;
       date: string | null;
     } | null>(null),
-    [panel, setPanel] = useState<"share" | "trash" | "notifications" | null>(
-      null,
-    );
+    [panel, setPanel] = useState<
+      "share" | "trash" | "notifications" | "keys" | null
+    >(null);
   const [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [notice, setNotice] = useState(""),
@@ -308,6 +309,10 @@ function App() {
                 <Icon name="bell" />
                 알림 설정
               </button>
+              <button onClick={() => setPanel("keys")}>
+                <Icon name="link" />
+                API 키 관리
+              </button>
               <button onClick={() => setPanel("trash")}>
                 <Icon name="trash" />
                 휴지통
@@ -403,6 +408,9 @@ function App() {
           </button>
           {!readOnly && (
             <>
+              <button onClick={() => setPanel("keys")} aria-label="API 키 관리">
+                API 키
+              </button>
               <button
                 onClick={() => setPanel("notifications")}
                 aria-label="알림"
@@ -707,7 +715,8 @@ function App() {
           </button>
         </Modal>
       )}
-      {panel && (
+      {panel === "keys" && <AgentKeys onClose={() => setPanel(null)} />}
+      {panel && panel !== "keys" && (
         <Settings
           panel={panel}
           me={me}
