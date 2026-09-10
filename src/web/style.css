@@ -1750,15 +1750,34 @@ nav button.active {
   padding: 4px;
   pointer-events: none;
 }
-.history-toolbar {
+.toast {
+  flex-wrap: wrap;
+  width: max-content;
+}
+.toast-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.toast-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 16px;
+  gap: 6px;
 }
-.history-toolbar button {
+.toast-actions button,
+.toast-close {
+  background: transparent;
+  color: white;
+  border-color: #ffffff60;
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+.toast-actions button:hover,
+.toast-close:hover {
+  background: #ffffff20;
+}
+.toast-close {
   display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
+  padding: 6px;
+  border: 0;
 }

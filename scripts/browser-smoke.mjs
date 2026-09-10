@@ -141,7 +141,11 @@ try {
     .locator(".task-card")
     .filter({ hasText: "브라우저 확인 일정" })
     .waitFor();
-  await page.getByRole("button", { name: "실행 취소", exact: true }).click();
+  assert.equal(await page.locator(".history-toolbar").count(), 0);
+  await page
+    .locator(".toast")
+    .getByRole("button", { name: "실행 취소", exact: true })
+    .click();
   await page
     .locator(".task-card")
     .filter({ hasText: "브라우저 확인 일정" })
@@ -155,12 +159,32 @@ try {
       (b) => b.textContent === "다시 실행" && !b.disabled,
     ),
   );
-  await page.keyboard.press("Control+Shift+z");
+  await page
+    .locator(".toast")
+    .getByRole("button", { name: "다시 실행", exact: true })
+    .click();
   await page
     .locator(".task-card")
     .filter({ hasText: "브라우저 확인 일정" })
     .waitFor();
   await peer
+    .locator(".task-card")
+    .filter({ hasText: "브라우저 확인 일정" })
+    .waitFor();
+  await page.getByRole("button", { name: "알림 닫기", exact: true }).click();
+  assert.equal(await page.locator(".toast").count(), 0);
+  await page.keyboard.press("Control+z");
+  await page
+    .locator(".task-card")
+    .filter({ hasText: "브라우저 확인 일정" })
+    .waitFor({ state: "hidden" });
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll(".toast button")].some(
+      (b) => b.textContent === "다시 실행" && !b.disabled,
+    ),
+  );
+  await page.keyboard.press("Control+Shift+z");
+  await page
     .locator(".task-card")
     .filter({ hasText: "브라우저 확인 일정" })
     .waitFor();

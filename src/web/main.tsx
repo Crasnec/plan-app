@@ -39,6 +39,15 @@ function App() {
   });
   const [historyBusy, setHistoryBusy] = useState(false);
   const historyPending = useRef(false);
+  const historyLatest = useRef(history);
+  const updateHistory = (state: HistoryState) => {
+    historyLatest.current = state;
+    setHistory(state);
+  };
+  const [noticeIds, setNoticeIds] = useState<{ undo?: string; redo?: string }>(
+    {},
+  );
+  const [noticeHistory, setNoticeHistory] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(() => {
     try {
       return localStorage.getItem("plan.sidebar-hidden") === "1";
@@ -81,6 +90,18 @@ function App() {
     [loading, setLoading] = useState(true),
     [notice, setNotice] = useState(""),
     [online, setOnline] = useState(navigator.onLine);
+  const notify = (message: string, undoable = false) => {
+    setNotice(message);
+    setNoticeHistory(undoable);
+    setNoticeIds(
+      undoable
+        ? {
+            undo: historyLatest.current.undo?.id,
+            redo: historyLatest.current.redo?.id,
+          }
+        : {},
+    );
+  };
   const [moving, setMoving] = useState<{
       event: Occurrence;
       start: string;
@@ -115,7 +136,7 @@ function App() {
       ]);
       if (sequence !== loadSequence.current) return;
       setEvents(data);
-      if (historyState) setHistory(historyState);
+      if (historyState) updateHistory(historyState);
       setError("");
     } catch (e) {
       if (sequence !== loadSequence.current) return;
@@ -170,10 +191,10 @@ function App() {
     };
   }, [load, me, shared]);
   useEffect(() => {
-    if (!notice) return;
+    if (!notice || noticeHistory) return;
     const timer = setTimeout(() => setNotice(""), 5000);
     return () => clearTimeout(timer);
-  }, [notice]);
+  }, [notice, noticeHistory]);
   const filtered = events.filter(
     (e) => filter === "all" || (filter === "done" ? e.done : !e.done),
   );
@@ -215,6 +236,10 @@ function App() {
   async function completeEvent(e: Occurrence) {
     try {
       await change(e, { ...e, done: !e.done }, "one");
+      notify(
+        e.done ? "완료 표시를 해제했습니다." : "일정을 완료했습니다.",
+        true,
+      );
     } catch (err) {
       await load();
       setError((err as Error).message);
@@ -245,7 +270,7 @@ function App() {
           : -540
         : event.reminder;
     await change(event, { ...event, kind, start, end, reminder }, scope);
-    setNotice("일정을 옮겼습니다.");
+    notify("일정을 옮겼습니다.", true);
   }
   function onMove(
     event: Occurrence,
@@ -282,14 +307,15 @@ function App() {
     historyPending.current = true;
     setHistoryBusy(true);
     try {
-      setHistory(
+      updateHistory(
         await api<HistoryState>(`/history/${direction}`, { id: entry.id }),
       );
       await load();
-      setNotice(
+      notify(
         direction === "undo"
           ? `${entry.label} 작업을 되돌렸습니다.`
           : `${entry.label} 작업을 다시 실행했습니다.`,
+        true,
       );
     } catch (e) {
       await load();
@@ -498,34 +524,6 @@ function App() {
             )}
           </div>
         </header>
-        {!readOnly && (
-          <nav className="history-toolbar" aria-label="작업 기록">
-            <button
-              disabled={!history.undo || historyBusy || !online}
-              onClick={() => void runHistory("undo")}
-              title={
-                history.undo
-                  ? `${history.undo.label} 되돌리기 · Ctrl/⌘ Z`
-                  : "되돌릴 작업이 없습니다"
-              }
-            >
-              <Icon name="left" size={16} />
-              실행 취소
-            </button>
-            <button
-              disabled={!history.redo || historyBusy || !online}
-              onClick={() => void runHistory("redo")}
-              title={
-                history.redo
-                  ? `${history.redo.label} 다시 실행 · Ctrl/⌘ Shift Z`
-                  : "다시 실행할 작업이 없습니다"
-              }
-            >
-              <Icon name="right" size={16} />
-              다시 실행
-            </button>
-          </nav>
-        )}
         {me.demo && !shared && (
           <div className="demo-banner">
             로컬 미리보기 · 일정은 이 환경의 데모 데이터베이스에 저장됩니다.
@@ -815,11 +813,11 @@ function App() {
               await api("/items", f);
               await load();
             }
-            setNotice("일정을 저장했습니다.");
+            notify("일정을 저장했습니다.", true);
           }}
           onDelete={async (scope) => {
             await change(editor.event!, editor.event!, scope, true);
-            setNotice("휴지통으로 이동했습니다.");
+            notify("휴지통으로 이동했습니다.", true);
           }}
         />
       )}
@@ -884,13 +882,49 @@ function App() {
           me={me}
           onClose={() => setPanel(null)}
           onChange={load}
-          notify={setNotice}
+          notify={notify}
         />
       )}
       {notice && (
-        <div className="toast" role="status">
+        <div className="toast">
           <Icon name="check" size={18} />
-          {notice}
+          <span className="toast-message" role="status">
+            {notice}
+          </span>
+          {noticeHistory && !readOnly && (
+            <div className="toast-actions" aria-label="작업 기록">
+              {history.undo && noticeIds.undo === history.undo.id && (
+                <button
+                  disabled={
+                    historyBusy || !online || !!editor || !!panel || !!moving
+                  }
+                  onClick={() => void runHistory("undo")}
+                  title={`${history.undo.label} 되돌리기 · Ctrl/⌘ Z`}
+                >
+                  실행 취소
+                </button>
+              )}
+              {history.redo && noticeIds.redo === history.redo.id && (
+                <button
+                  disabled={
+                    historyBusy || !online || !!editor || !!panel || !!moving
+                  }
+                  onClick={() => void runHistory("redo")}
+                  title={`${history.redo.label} 다시 실행 · Ctrl/⌘ Shift Z`}
+                >
+                  다시 실행
+                </button>
+              )}
+            </div>
+          )}
+          <button
+            className="toast-close"
+            aria-label="알림 닫기"
+            disabled={historyBusy}
+            onClick={() => setNotice("")}
+          >
+            <Icon name="close" size={16} />
+          </button>
         </div>
       )}
     </div>
@@ -907,7 +941,7 @@ function Settings({
   me: Me;
   onClose: () => void;
   onChange: () => Promise<void>;
-  notify: (s: string) => void;
+  notify: (s: string, undoable?: boolean) => void;
 }) {
   const [trash, setTrash] = useState<
       { id: string; title: string; deleted_at: number }[]
@@ -1072,7 +1106,7 @@ function Settings({
                       await api(`/trash/${t.id}/restore`, {});
                       setTrash(await api("/trash"));
                       await onChange();
-                      notify("일정을 복구했습니다.");
+                      notify("일정을 복구했습니다.", true);
                     })
                   }
                 >
