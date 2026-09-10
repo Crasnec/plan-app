@@ -1,0 +1,10 @@
+{
+    email crasnec@gmail.com
+}
+
+plan.crasnec.com {
+    encode zstd gzip
+    reverse_proxy plan-app:3000 {
+        flush_interval -1
+    }
+}
