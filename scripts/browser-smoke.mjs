@@ -141,6 +141,29 @@ try {
     .locator(".task-card")
     .filter({ hasText: "브라우저 확인 일정" })
     .waitFor();
+  await page.getByRole("button", { name: "실행 취소", exact: true }).click();
+  await page
+    .locator(".task-card")
+    .filter({ hasText: "브라우저 확인 일정" })
+    .waitFor({ state: "hidden" });
+  await peer
+    .locator(".task-card")
+    .filter({ hasText: "브라우저 확인 일정" })
+    .waitFor({ state: "hidden" });
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("button")].some(
+      (b) => b.textContent === "다시 실행" && !b.disabled,
+    ),
+  );
+  await page.keyboard.press("Control+Shift+z");
+  await page
+    .locator(".task-card")
+    .filter({ hasText: "브라우저 확인 일정" })
+    .waitFor();
+  await peer
+    .locator(".task-card")
+    .filter({ hasText: "브라우저 확인 일정" })
+    .waitFor();
   await peer.close();
   const koreanToday = new Date(Date.now() + 9 * 3600000)
     .toISOString()

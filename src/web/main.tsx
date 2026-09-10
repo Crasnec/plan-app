@@ -29,6 +29,16 @@ const weekdays = [
   "토요일",
 ];
 function App() {
+  type HistoryState = {
+    undo: { id: string; label: string } | null;
+    redo: { id: string; label: string } | null;
+  };
+  const [history, setHistory] = useState<HistoryState>({
+    undo: null,
+    redo: null,
+  });
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const historyPending = useRef(false);
   const [sidebarHidden, setSidebarHidden] = useState(() => {
     try {
       return localStorage.getItem("plan.sidebar-hidden") === "1";
@@ -97,11 +107,15 @@ function App() {
     const r = range(date, view);
     const sequence = ++loadSequence.current;
     try {
-      const data = await api<Occurrence[]>(
-        `/items?from=${r.from}&to=${r.to}${shared ? `&share=${encodeURIComponent(shared)}` : ""}`,
-      );
+      const [data, historyState] = await Promise.all([
+        api<Occurrence[]>(
+          `/items?from=${r.from}&to=${r.to}${shared ? `&share=${encodeURIComponent(shared)}` : ""}`,
+        ),
+        shared ? Promise.resolve(null) : api<HistoryState>("/history"),
+      ]);
       if (sequence !== loadSequence.current) return;
       setEvents(data);
+      if (historyState) setHistory(historyState);
       setError("");
     } catch (e) {
       if (sequence !== loadSequence.current) return;
@@ -253,6 +267,66 @@ function App() {
     await api("/logout", {});
     location.assign("/");
   }
+  async function runHistory(direction: "undo" | "redo") {
+    const entry = history[direction];
+    if (
+      !entry ||
+      historyPending.current ||
+      readOnly ||
+      !online ||
+      editor ||
+      panel ||
+      moving
+    )
+      return;
+    historyPending.current = true;
+    setHistoryBusy(true);
+    try {
+      setHistory(
+        await api<HistoryState>(`/history/${direction}`, { id: entry.id }),
+      );
+      await load();
+      setNotice(
+        direction === "undo"
+          ? `${entry.label} 작업을 되돌렸습니다.`
+          : `${entry.label} 작업을 다시 실행했습니다.`,
+      );
+    } catch (e) {
+      await load();
+      setError((e as Error).message);
+    } finally {
+      historyPending.current = false;
+      setHistoryBusy(false);
+    }
+  }
+  useEffect(() => {
+    const keydown = (e: KeyboardEvent) => {
+      if (
+        (!e.ctrlKey && !e.metaKey) ||
+        e.altKey ||
+        e.repeat ||
+        (e.target as HTMLElement)?.closest(
+          "input,textarea,select,[contenteditable],dialog",
+        )
+      )
+        return;
+      const key = e.key.toLowerCase();
+      const direction =
+        key === "z"
+          ? e.shiftKey
+            ? "redo"
+            : "undo"
+          : key === "y"
+            ? "redo"
+            : null;
+      if (direction && !readOnly && online && !editor && !panel && !moving) {
+        e.preventDefault();
+        void runHistory(direction);
+      }
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  });
   if (!me)
     return (
       <div className="loading-screen">
@@ -424,6 +498,34 @@ function App() {
             )}
           </div>
         </header>
+        {!readOnly && (
+          <nav className="history-toolbar" aria-label="작업 기록">
+            <button
+              disabled={!history.undo || historyBusy || !online}
+              onClick={() => void runHistory("undo")}
+              title={
+                history.undo
+                  ? `${history.undo.label} 되돌리기 · Ctrl/⌘ Z`
+                  : "되돌릴 작업이 없습니다"
+              }
+            >
+              <Icon name="left" size={16} />
+              실행 취소
+            </button>
+            <button
+              disabled={!history.redo || historyBusy || !online}
+              onClick={() => void runHistory("redo")}
+              title={
+                history.redo
+                  ? `${history.redo.label} 다시 실행 · Ctrl/⌘ Shift Z`
+                  : "다시 실행할 작업이 없습니다"
+              }
+            >
+              <Icon name="right" size={16} />
+              다시 실행
+            </button>
+          </nav>
+        )}
         {me.demo && !shared && (
           <div className="demo-banner">
             로컬 미리보기 · 일정은 이 환경의 데모 데이터베이스에 저장됩니다.
