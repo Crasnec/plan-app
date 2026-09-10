@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addDays,
   weekday,
@@ -45,6 +45,8 @@ export function Calendar({
   readOnly: boolean;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
+  const [expandedDate, setExpandedDate] = useState<string | null>(null);
+  useEffect(() => setExpandedDate(null), [date, view]);
   const r = range(date, view),
     count = view === "month" ? 42 : view === "week" ? 7 : 1;
   const dates = Array.from({ length: count }, (_, i) => addDays(r.from, i));
@@ -158,11 +160,25 @@ export function Calendar({
                 >
                   {Number(d.slice(8))}
                 </button>
-                <div className="day-events">
-                  {dayEvents.slice(0, 3).map((e) => eventButton(e))}
+                <div className="day-events" id={`day-events-${d}`}>
+                  {(expandedDate === d ? dayEvents : dayEvents.slice(0, 3)).map(
+                    (e) => eventButton(e),
+                  )}
                   {dayEvents.length > 3 && (
-                    <button className="more-events" onClick={() => onSelect(d)}>
-                      +{dayEvents.length - 3}개 더 보기
+                    <button
+                      className="more-events"
+                      aria-expanded={expandedDate === d}
+                      aria-controls={`day-events-${d}`}
+                      onClick={() => {
+                        onSelect(d);
+                        setExpandedDate((current) =>
+                          current === d ? null : d,
+                        );
+                      }}
+                    >
+                      {expandedDate === d
+                        ? "접기"
+                        : `+${dayEvents.length - 3}개 더 보기`}
                     </button>
                   )}
                 </div>
