@@ -1503,3 +1503,33 @@ nav button.active {
     transition: none !important;
   }
 }
+.agent-keys p {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.agent-keys fieldset {
+  border: 1px solid #dfe4d5;
+  border-radius: 10px;
+  margin: 18px 0;
+}
+.agent-key-row {
+  border-top: 1px solid #dfe4d5;
+  padding: 16px 0;
+}
+.agent-key-row h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.agent-key-row small {
+  color: #687260;
+  font-weight: normal;
+}
+.agent-key-row p {
+  font-size: 12px;
+}
+.issued-key {
+  padding: 18px;
+  border-radius: 12px;
+  background: #eef0e6;
+  margin: 20px 0;
+}
