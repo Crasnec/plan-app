@@ -14,6 +14,7 @@ import { subscribe } from "./push.js";
 import { agentRouter, agentManagement } from "./agents.js";
 import type { Config } from "./config.js";
 import { validDate, dateDiff, type Scope } from "../shared/domain.js";
+import { errorPage } from "./error-page.js";
 
 export function createApp(
   store: Store,
@@ -215,13 +216,17 @@ export function createApp(
   app.get(["/", "/s/:token"], (_req, res) =>
     res.sendFile(resolve(staticDir, "index.html")),
   );
+  app.use((_req, _res, next) =>
+    next(new HttpError(404, "페이지를 찾을 수 없습니다.")),
+  );
   app.use(
     (
       error: unknown,
-      _req: express.Request,
+      req: express.Request,
       res: express.Response,
       _next: express.NextFunction,
     ) => {
+      if (res.headersSent) return _next(error);
       const status =
         error instanceof HttpError
           ? error.status
@@ -241,16 +246,25 @@ export function createApp(
             : status === 400
               ? "요청 형식이 올바르지 않습니다."
               : "요청을 처리하지 못했습니다. 다시 시도해 주세요.";
-      res
-        .status(
-          status === 500 &&
-            /[가-힣]/.test(message) &&
-            error instanceof Error &&
-            /[가-힣]/.test(error.message)
-            ? 400
-            : status,
-        )
-        .json({ error: message });
+      const responseStatus =
+        status === 500 &&
+        /[가-힣]/.test(message) &&
+        error instanceof Error &&
+        /[가-힣]/.test(error.message)
+          ? 400
+          : status;
+      res.status(responseStatus);
+      // API clients retain JSON regardless of Accept; browser navigations get standalone HTML.
+      if (
+        req.path !== "/api" &&
+        !req.path.startsWith("/api/") &&
+        req.path !== "/healthz" &&
+        req.accepts(["json", "html"]) === "html"
+      ) {
+        res.vary("Accept").type("html").send(errorPage(responseStatus));
+        return;
+      }
+      res.json({ error: message });
     },
   );
   return {
