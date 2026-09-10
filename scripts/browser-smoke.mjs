@@ -315,6 +315,44 @@ try {
     .click();
   assert.equal(await page.locator(".time-column").count(), 1);
   await dragTime(-60, "10:00");
+  const convertingTitle = "브라우저 확인 일정";
+  const allDayEvent = () =>
+    page
+      .locator(".all-day-row .calendar-event")
+      .filter({ hasText: convertingTitle })
+      .first();
+  const timedEvent = () =>
+    page.locator(".time-event").filter({ hasText: convertingTitle }).first();
+  const conversionsBefore = changes;
+  await allDayEvent()
+    .getByRole("button")
+    .dragTo(page.locator(".time-column .time-slot").nth(26), {
+      targetPosition: { x: 20, y: 2 },
+    });
+  await timedEvent().waitFor();
+  await page.waitForFunction(
+    async ({ from, to, title }) => {
+      const items = await (
+        await fetch(`/api/items?from=${from}&to=${to}`)
+      ).json();
+      const item = items.find((e) => e.title === title);
+      return (
+        item?.kind === "timed" &&
+        Date.parse(item.end) - Date.parse(item.start) === 3600000 &&
+        item.reminder === 10
+      );
+    },
+    { from: koreanToday, to: tomorrow, title: convertingTitle },
+  );
+  assert.equal(changes, conversionsBefore + 1);
+  await timedEvent()
+    .getByRole("button")
+    .dragTo(page.locator(".all-day-row > div"), {
+      targetPosition: { x: 20, y: 5 },
+    });
+  await allDayEvent().waitFor();
+  assert.equal(await timedEvent().count(), 0);
+  assert.equal(changes, conversionsBefore + 2);
   await page
     .locator(".view-switch")
     .getByRole("button", { name: "주", exact: true })

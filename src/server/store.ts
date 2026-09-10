@@ -198,6 +198,22 @@ export class Store {
                 : addDays(next.start!, duration / DAY);
           }
           validate(next);
+          if (
+            item.rule &&
+            fields!.kind !== item.kind &&
+            fields!.kind !== "undated" &&
+            item.kind !== "undated"
+          ) {
+            // Changing type from a later occurrence must not move the series anchor to that occurrence.
+            const anchor = addDays(
+              startDate(item)!,
+              dateDiff(startDate(fields!)!, startDate(current)!),
+            );
+            const shifted = atDate(next, anchor);
+            next.start = shifted.start;
+            next.end = shifted.end;
+            validate(next);
+          }
         }
         this.save(next);
         if (!deleting) this.preserveExceptions(item, next, exceptions);

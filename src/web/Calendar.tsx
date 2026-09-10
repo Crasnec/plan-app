@@ -41,7 +41,13 @@ export function Calendar({
   events: Occurrence[];
   onSelect: (d: string) => void;
   onOpen: (e: Occurrence) => void;
-  onMove: (e: Occurrence, start: string, end: string, resize: boolean) => void;
+  onMove: (
+    e: Occurrence,
+    start: string,
+    end: string,
+    resize: boolean,
+    kind?: Occurrence["kind"],
+  ) => void;
   readOnly: boolean;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
@@ -118,20 +124,29 @@ export function Calendar({
     return Math.max(0, Math.min(1410, Math.floor(position / 30) * 30));
   };
   const activeEvent = dragging && events.find((e) => e.id === dragging.id);
-  const timeAt = (d: string, minute: number) => new Date(Date.parse(toUTC(`${d}T00:00`)) + Math.round(minute * 60000)).toISOString();
-  const targetTime =
-    timeTarget &&
-    timeAt(timeTarget.date, timeTarget.minute);
+  const timeAt = (d: string, minute: number) =>
+    new Date(
+      Date.parse(toUTC(`${d}T00:00`)) + Math.round(minute * 60000),
+    ).toISOString();
+  const targetTime = timeTarget && timeAt(timeTarget.date, timeTarget.minute);
   const previewEnd =
-    targetTime && activeEvent?.kind === "timed"
+    targetTime && activeEvent
       ? new Date(
           Date.parse(targetTime) +
             (dragging?.resize
               ? 30 * 60000
-              : Date.parse(activeEvent.end!) - Date.parse(activeEvent.start!)),
+              : activeEvent.kind === "all_day"
+                ? 60 * 60000
+                : Date.parse(activeEvent.end!) -
+                  Date.parse(activeEvent.start!)),
         ).toISOString()
       : null;
-  const drop = (ev: React.DragEvent, d: string, minute?: number) => {
+  const drop = (
+    ev: React.DragEvent,
+    d: string,
+    minute?: number,
+    allDay = false,
+  ) => {
     ev.preventDefault();
     resetDrag();
     if (!movable) return;
@@ -139,6 +154,23 @@ export function Calendar({
       const payload = JSON.parse(ev.dataTransfer.getData("application/plan"));
       const e = events.find((x) => x.id === payload.id);
       if (!e) return;
+      if (e.kind === "all_day" && minute !== undefined) {
+        if (payload.resize) return;
+        const start = timeAt(d, minute);
+        onMove(
+          e,
+          start,
+          new Date(Date.parse(start) + 3600000).toISOString(),
+          false,
+          "timed",
+        );
+        return;
+      }
+      if (e.kind === "timed" && allDay) {
+        if (payload.resize) return;
+        onMove(e, d, addDays(d, 1), false, "all_day");
+        return;
+      }
       if (e.kind === "all_day") {
         if (payload.resize) {
           const end = addDays(d, 1);
@@ -150,7 +182,10 @@ export function Calendar({
           onMove(e, d, addDays(d, duration), false);
         }
       } else if (e.kind === "timed") {
-        const target = minute === undefined ? toUTC(`${d}T${local(e.start!).slice(11, 16)}`) : timeAt(d, minute);
+        const target =
+          minute === undefined
+            ? toUTC(`${d}T${local(e.start!).slice(11, 16)}`)
+            : timeAt(d, minute);
         if (payload.resize) {
           const end =
             minute === undefined
@@ -321,11 +356,30 @@ export function Calendar({
         {dates.map((d) => (
           <div
             key={d}
+            className={dropDate === d ? "all-day-target" : ""}
             onDragOver={(e) => {
-              if (movable) e.preventDefault();
+              if (
+                movable &&
+                dragging &&
+                !dragging.resize &&
+                e.dataTransfer.types.includes("application/plan")
+              ) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setDropDate(d);
+              }
             }}
-            onDrop={(e) => drop(e, d)}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                setDropDate(null);
+            }}
+            onDrop={(e) => drop(e, d, undefined, true)}
           >
+            {dropDate === d && (
+              <small className="all-day-target-label" role="status">
+                {Number(d.slice(5, 7))}/{Number(d.slice(8))} 종일로 이동
+              </small>
+            )}
             {events
               .filter(
                 (e) =>

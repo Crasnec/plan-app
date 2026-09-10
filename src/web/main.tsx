@@ -75,6 +75,7 @@ function App() {
       event: Occurrence;
       start: string;
       end: string;
+      kind: Occurrence["kind"];
     } | null>(null),
     [moveScope, setMoveScope] = useState<Scope>("one"),
     [savingMove, setSavingMove] = useState(false);
@@ -220,18 +221,33 @@ function App() {
     start: string,
     end: string,
     scope: Scope,
+    kind: Occurrence["kind"] = event.kind,
   ) {
-    if (sameSchedule(event, { ...event, start, end })) return;
-    await change(event, { ...event, start, end }, scope);
+    if (sameSchedule(event, { kind, start, end })) return;
+    const reminder =
+      event.kind !== kind && event.reminder !== null
+        ? kind === "timed"
+          ? 10
+          : -540
+        : event.reminder;
+    await change(event, { ...event, kind, start, end, reminder }, scope);
     setNotice("일정을 옮겼습니다.");
   }
-  function onMove(event: Occurrence, start: string, end: string) {
-    if (sameSchedule(event, { ...event, start, end })) return;
+  function onMove(
+    event: Occurrence,
+    start: string,
+    end: string,
+    _resize: boolean,
+    kind: Occurrence["kind"] = event.kind,
+  ) {
+    if (sameSchedule(event, { kind, start, end })) return;
     if (event.recurring) {
       setMoveScope("one");
-      setMoving({ event, start, end });
+      setMoving({ event, start, end, kind });
     } else
-      void move(event, start, end, "one").catch((e) => setError(e.message));
+      void move(event, start, end, "one", kind).catch((e) =>
+        setError(e.message),
+      );
   }
   async function logout() {
     await api("/logout", {});
@@ -739,7 +755,13 @@ function App() {
             onClick={async () => {
               setSavingMove(true);
               try {
-                await move(moving.event, moving.start, moving.end, moveScope);
+                await move(
+                  moving.event,
+                  moving.start,
+                  moving.end,
+                  moveScope,
+                  moving.kind,
+                );
                 setMoving(null);
               } catch (e) {
                 setError((e as Error).message);
