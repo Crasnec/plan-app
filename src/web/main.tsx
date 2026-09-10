@@ -29,6 +29,22 @@ const weekdays = [
   "토요일",
 ];
 function App() {
+  const [sidebarHidden, setSidebarHidden] = useState(() => {
+    try {
+      return localStorage.getItem("plan.sidebar-hidden") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = () => {
+    const hidden = !sidebarHidden;
+    setSidebarHidden(hidden);
+    try {
+      localStorage.setItem("plan.sidebar-hidden", hidden ? "1" : "0");
+    } catch {
+      /* Keep the toggle usable when storage is unavailable. */
+    }
+  };
   const shared = location.pathname.startsWith("/s/")
     ? location.pathname.split("/")[2]
     : null;
@@ -269,7 +285,7 @@ function App() {
     );
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className="sidebar" id="main-sidebar" hidden={sidebarHidden}>
         <a className="brand" href="/">
           <span className="brand-mark">
             <Icon name="leaf" size={24} />
@@ -353,6 +369,17 @@ function App() {
             </p>
           </div>
           <div className="header-actions">
+            <button
+              className="sidebar-toggle"
+              onClick={toggleSidebar}
+              aria-controls="main-sidebar"
+              aria-expanded={!sidebarHidden}
+              aria-label={sidebarHidden ? "사이드바 펼치기" : "사이드바 숨기기"}
+              title={sidebarHidden ? "사이드바 펼치기" : "사이드바 숨기기"}
+            >
+              <Icon name="list" />
+              <span>{sidebarHidden ? "메뉴 열기" : "메뉴 숨기기"}</span>
+            </button>
             {!readOnly && (
               <>
                 <button

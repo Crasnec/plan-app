@@ -47,6 +47,28 @@ try {
   await page.goto(origin);
   await page.getByRole("heading", { name: "오늘도, 차근차근" }).waitFor();
   await page.locator(".task-card").first().waitFor();
+  const initialWidth = await page
+    .locator(".main-content")
+    .evaluate((el) => el.getBoundingClientRect().width);
+  await page
+    .getByRole("button", { name: "사이드바 숨기기", exact: true })
+    .click();
+  assert.equal(await page.locator(".sidebar").isVisible(), false);
+  assert(
+    (await page
+      .locator(".main-content")
+      .evaluate((el) => el.getBoundingClientRect().width)) > initialWidth,
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: "사이드바 펼치기", exact: true })
+    .waitFor();
+  assert.equal(await page.locator(".sidebar").isVisible(), false);
+  await page
+    .getByRole("button", { name: "사이드바 펼치기", exact: true })
+    .click();
+  assert.equal(await page.locator(".sidebar").isVisible(), true);
+  await page.locator(".task-card").first().waitFor();
   const peer = await context.newPage();
   await peer.goto(origin);
   await peer.locator(".task-card").first().waitFor();
