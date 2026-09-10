@@ -46,6 +46,25 @@ export function Calendar({
 }) {
   const scroll = useRef<HTMLDivElement>(null);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<{
+    id: string;
+    resize: boolean;
+  } | null>(null);
+  const [dropDate, setDropDate] = useState<string | null>(null);
+  const resetDrag = () => {
+    setDragging(null);
+    setDropDate(null);
+  };
+  useEffect(() => {
+    window.addEventListener("dragend", resetDrag);
+    window.addEventListener("drop", resetDrag);
+    window.addEventListener("blur", resetDrag);
+    return () => {
+      window.removeEventListener("dragend", resetDrag);
+      window.removeEventListener("drop", resetDrag);
+      window.removeEventListener("blur", resetDrag);
+    };
+  }, []);
   useEffect(() => setExpandedDate(null), [date, view]);
   const r = range(date, view),
     count = view === "month" ? 42 : view === "week" ? 7 : 1;
@@ -55,7 +74,13 @@ export function Calendar({
     if (view !== "month" && scroll.current) scroll.current.scrollTop = 7 * 60;
   }, [view]);
   const startDrag = (ev: React.DragEvent, e: Occurrence, resize = false) => {
+    if (!movable) {
+      ev.preventDefault();
+      return;
+    }
     ev.stopPropagation();
+    setDragging({ id: e.id, resize });
+    setDropDate(null);
     ev.dataTransfer.setData(
       "application/plan",
       JSON.stringify({ id: e.id, resize }),
@@ -64,6 +89,7 @@ export function Calendar({
   };
   const drop = (ev: React.DragEvent, d: string, minute?: number) => {
     ev.preventDefault();
+    resetDrag();
     if (!movable) return;
     try {
       const payload = JSON.parse(ev.dataTransfer.getData("application/plan"));
@@ -107,12 +133,26 @@ export function Calendar({
   };
   const eventButton = (e: Occurrence, small = false) => (
     <div
-      className={`calendar-event ${e.done ? "is-done" : ""} ${e.public ? "is-public" : ""}`}
+      className={`calendar-event ${movable ? "is-movable" : ""} ${dragging?.id === e.id ? "is-dragging" : ""} ${e.done ? "is-done" : ""} ${e.public ? "is-public" : ""}`}
       key={e.id}
       draggable={movable}
       onDragStart={(ev) => startDrag(ev, e)}
     >
-      <button onClick={() => onOpen(e)} title={e.title}>
+      <button
+        draggable={movable}
+        onDragStart={(ev) => startDrag(ev, e)}
+        onClick={() => {
+          if (!dragging) onOpen(e);
+        }}
+        title={
+          movable ? `${e.title} · 끌어서 날짜 이동, 클릭해서 열기` : e.title
+        }
+      >
+        {movable && (
+          <span className="drag-grip" aria-hidden="true">
+            ⠿
+          </span>
+        )}
         {e.kind === "timed" && <span>{local(e.start!).slice(11, 16)}</span>}
         {e.done && <Icon name="check" size={12} />}
         <span className="event-title">{e.title}</span>
@@ -146,12 +186,30 @@ export function Calendar({
             return (
               <div
                 key={d}
-                className={`day-cell ${d === selected ? "selected" : ""} ${d.slice(0, 7) !== date.slice(0, 7) ? "outside" : ""}`}
+                className={`day-cell ${dropDate === d ? "drop-target" : ""} ${d === selected ? "selected" : ""} ${d.slice(0, 7) !== date.slice(0, 7) ? "outside" : ""}`}
                 onDragOver={(e) => {
-                  if (movable) e.preventDefault();
+                  if (
+                    movable &&
+                    dragging &&
+                    e.dataTransfer.types.includes("application/plan")
+                  ) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setDropDate(d);
+                  }
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                    setDropDate((current) => (current === d ? null : current));
                 }}
                 onDrop={(e) => drop(e, d)}
               >
+                {dropDate === d && (
+                  <span className="drop-label" role="status">
+                    {Number(d.slice(5, 7))}/{Number(d.slice(8))}{" "}
+                    {dragging?.resize ? "종료일로 변경" : "날짜로 이동"}
+                  </span>
+                )}
                 <button
                   className={`day-number ${d === today() ? "today" : ""}`}
                   aria-label={`${d} 선택`}
