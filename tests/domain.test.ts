@@ -24,6 +24,43 @@ const base: Rule = {
   weekday: 0,
   until: null,
 };
+test("Converting all recurring occurrences between timed and all-day preserves earlier dates", () => {
+  const s = new Store(":memory:");
+  try {
+    const item = s.create({
+      ...defaultFields("2026-09-01"),
+      title: "유형 변환",
+      rule: { ...base, frequency: "daily" },
+    });
+    let selected = s.list("2026-09-03", "2026-09-04")[0];
+    s.mutate(item.id, selected.key, selected.version, "all", {
+      ...selected,
+      kind: "timed",
+      start: toUTC("2026-09-03T13:00"),
+      end: toUTC("2026-09-03T14:00"),
+      reminder: 10,
+    });
+    let list = s.list("2026-09-01", "2026-09-04");
+    assert.equal(list.length, 3);
+    assert.equal(list[0].start, toUTC("2026-09-01T13:00"));
+    selected = list[2];
+    s.mutate(item.id, selected.key, selected.version, "all", {
+      ...selected,
+      kind: "all_day",
+      start: "2026-09-03",
+      end: "2026-09-04",
+      reminder: -540,
+    });
+    list = s.list("2026-09-01", "2026-09-04");
+    assert.deepEqual(
+      list.map((e) => e.start),
+      ["2026-09-01", "2026-09-02", "2026-09-03"],
+    );
+    assert(list.every((e) => e.kind === "all_day"));
+  } finally {
+    s.db.close();
+  }
+});
 test("editing all from a completed occurrence never marks future occurrences complete", () => {
   const s = new Store(":memory:");
   try {
@@ -85,7 +122,11 @@ test("biweekly recurrence uses Monday week boundary and inclusive until", () => 
 });
 test("invalid dates and backwards intervals are rejected", () => {
   assert.throws(() =>
-    validate({ ...defaultFields("2026-02-28"), title: "잘못된 날짜", start: "2026-02-30" }),
+    validate({
+      ...defaultFields("2026-02-28"),
+      title: "잘못된 날짜",
+      start: "2026-02-30",
+    }),
   );
   assert.throws(() =>
     validate({
