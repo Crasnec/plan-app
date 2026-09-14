@@ -3,6 +3,8 @@ import { OAuth2Client, CodeChallengeMethod } from "google-auth-library";
 import type { Express, Request, Response } from "express";
 import type { Config } from "./config.js";
 import { Store, HttpError } from "./store.js";
+import { touchSession } from "./session-info.js";
+import { sessionRoutes } from "./sessions.js";
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export const token = () => randomBytes(32).toString("base64url");
 export function cookie(req: Request, name: string) {
@@ -19,7 +21,9 @@ export function owner(req: Request, store: Store, cfg: Config) {
   const row = store.db
     .prepare("SELECT expires FROM sessions WHERE hash=?")
     .get(hash(cookie(req, "plan_session")));
-  return !!row && Number(row.expires) > Date.now();
+  const valid = !!row && Number(row.expires) > Date.now();
+  if (valid) touchSession(store, req, hash(cookie(req, "plan_session")));
+  return valid;
 }
 export const requireOwner = (req: Request, store: Store, cfg: Config) => {
   if (!owner(req, store, cfg)) throw new HttpError(401, "로그인이 필요합니다.");
@@ -155,6 +159,7 @@ export function authRoutes(
     store.db
       .prepare("INSERT INTO sessions VALUES(?,?)")
       .run(hash(session), Date.now() + 30 * 86400000);
+    touchSession(store, req, hash(session), Date.now());
     res.cookie("plan_session", session, { ...options, maxAge: 30 * 86400000 });
     res.redirect(
       typeof returnTo === "string" &&
@@ -162,6 +167,9 @@ export function authRoutes(
         ? returnTo
         : "/",
     );
+  });
+  sessionRoutes(app, store, cfg, revokeSession, (res) => {
+    res.clearCookie("plan_session", options);
   });
   app.post("/api/logout", (req, res) => {
     const sessionHash = hash(cookie(req, "plan_session"));

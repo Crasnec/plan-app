@@ -50,7 +50,9 @@ export class Store {
       INSERT OR IGNORE INTO migrations(version) VALUES(2);
       CREATE TABLE IF NOT EXISTS mcp_oauth(id TEXT PRIMARY KEY, kind TEXT NOT NULL, expires INTEGER NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS mcp_oauth_expiry ON mcp_oauth(expires);
-      INSERT OR IGNORE INTO migrations(version) VALUES(3);`);
+      INSERT OR IGNORE INTO migrations(version) VALUES(3);
+      CREATE TABLE IF NOT EXISTS session_details(session_hash TEXT PRIMARY KEY REFERENCES sessions(hash) ON DELETE CASCADE, id TEXT UNIQUE NOT NULL, device TEXT NOT NULL, created_at INTEGER, last_seen INTEGER);
+      INSERT OR IGNORE INTO migrations(version) VALUES(4);`);
   }
   transaction<T>(fn: () => T): T {
     if (this.transactionActive) return fn();

@@ -1824,6 +1824,48 @@ nav button.active {
 .settings-account h3 {
   font-size: 14px;
 }
+.session-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+.session-card,
+.session-confirm {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+.session-card h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+.current-session {
+  border-radius: 20px;
+  background: #e5ebda;
+  color: #49613c;
+  padding: 3px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.session-card dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  font-size: 12px;
+}
+.session-card dd {
+  margin: 0;
+}
+.session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
 .preferences-fields {
   border: 1px solid var(--line);
   border-radius: 12px;

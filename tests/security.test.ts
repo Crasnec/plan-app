@@ -179,6 +179,33 @@ test("Logout closes only matching SSE sessions; revoked sessions cannot receive 
       /event: change/,
     );
     assert.equal((await read(streams[2])).done, true);
+    f.store.db
+      .prepare("INSERT INTO sessions VALUES(?,?)")
+      .run(hash("d"), Date.now() + 60000);
+    const d = await fetch(`${f.url}/api/events`, {
+      headers: { Cookie: "plan_session=d" },
+    });
+    const dReader = d.body!.getReader();
+    streams.push(dReader);
+    await read(dReader);
+    const listed = await (
+      await fetch(`${f.url}/api/sessions`, {
+        headers: { Cookie: "plan_session=b" },
+      })
+    ).json();
+    const target = listed.sessions.find(
+      (s: { current: boolean }) => !s.current,
+    );
+    assert(target);
+    assert.equal(
+      (await post(`/api/sessions/${target.id}/revoke`, "b", {})).status,
+      200,
+    );
+    assert.equal((await read(dReader)).done, true);
+    assert.equal(
+      (await post("/api/sessions/revoke-others", "b", {})).status,
+      200,
+    );
   } finally {
     for (const reader of streams) await reader.cancel();
     await f.cleanup();

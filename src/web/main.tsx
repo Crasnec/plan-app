@@ -7,6 +7,7 @@ import { Editor } from "./Editor.js";
 import { Modal } from "./Modal.js";
 import { AgentKeys } from "./AgentKeys.js";
 import { SettingsHome } from "./SettingsHome.js";
+import { Sessions } from "./Sessions.js";
 import { defaultPreferences, type Preferences } from "../shared/preferences.js";
 import { Markdown } from "./Markdown.js";
 import {
@@ -88,7 +89,13 @@ function App() {
       date: string | null;
     } | null>(null),
     [panel, setPanel] = useState<
-      "settings" | "share" | "trash" | "notifications" | "keys" | null
+      | "settings"
+      | "share"
+      | "trash"
+      | "notifications"
+      | "keys"
+      | "sessions"
+      | null
     >(null);
   const [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
@@ -890,16 +897,25 @@ function App() {
           onBack={() => setPanel("settings")}
         />
       )}
-      {panel && panel !== "keys" && panel !== "settings" && (
-        <Settings
-          panel={panel}
-          me={me}
+      {panel === "sessions" && (
+        <Sessions
           onClose={() => setPanel(null)}
-          onBack={panel === "trash" ? undefined : () => setPanel("settings")}
-          onChange={load}
-          notify={notify}
+          onBack={() => setPanel("settings")}
         />
       )}
+      {panel &&
+        panel !== "keys" &&
+        panel !== "settings" &&
+        panel !== "sessions" && (
+          <Settings
+            panel={panel}
+            me={me}
+            onClose={() => setPanel(null)}
+            onBack={panel === "trash" ? undefined : () => setPanel("settings")}
+            onChange={load}
+            notify={notify}
+          />
+        )}
       {notice && (
         <div className="toast">
           <Icon name="check" size={18} />
