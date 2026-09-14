@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Modal } from "./Modal.js";
 import { Icon } from "./icons.js";
+import { defaultPreferences, type Preferences } from "../shared/preferences.js";
 import {
   addDays,
   defaultFields,
@@ -22,6 +23,7 @@ export function Editor({
   onClose,
   onSave,
   onDelete,
+  preferences = defaultPreferences,
 }: {
   event: Occurrence | null;
   date: string | null;
@@ -29,6 +31,7 @@ export function Editor({
   onClose: () => void;
   onSave: (fields: Fields, scope: Scope) => Promise<void>;
   onDelete: (scope: Scope) => Promise<void>;
+  preferences?: Preferences;
 }) {
   const [f, setF] = useState<Fields>(
     event
@@ -43,7 +46,7 @@ export function Editor({
           reminder: event.reminder,
           rule: event.rule,
         }
-      : defaultFields(date),
+      : { ...defaultFields(date), public: preferences.publicByDefault },
   );
   const [scope, setScope] = useState<Scope>("one");
   const [busy, setBusy] = useState(false),
@@ -86,7 +89,10 @@ export function Editor({
           : {
               kind: value,
               start: toUTC(`${d}T09:00`),
-              end: toUTC(`${d}T10:00`),
+              end: new Date(
+                Date.parse(toUTC(`${d}T09:00`)) +
+                  (event ? 60 : preferences.durationMinutes) * 60000,
+              ).toISOString(),
               reminder: 10,
             },
     );
@@ -199,8 +205,24 @@ export function Editor({
                     type="datetime-local"
                     value={start}
                     onChange={(e) => {
-                      if (e.target.value)
-                        update({ start: toUTC(e.target.value) });
+                      if (e.target.value) {
+                        const nextStart = toUTC(e.target.value);
+                        const duration =
+                          Date.parse(f.end!) - Date.parse(f.start!);
+                        update({
+                          start: nextStart,
+                          ...(!event
+                            ? {
+                                end: new Date(
+                                  Date.parse(nextStart) +
+                                    (duration > 0
+                                      ? duration
+                                      : preferences.durationMinutes * 60000),
+                                ).toISOString(),
+                              }
+                            : {}),
+                        });
+                      }
                     }}
                   />
                 ) : (

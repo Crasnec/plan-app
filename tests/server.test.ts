@@ -31,8 +31,13 @@ test("Account email is returned only to the owner session", async () => {
   const f = await fixture();
   try {
     assert.equal((await (await f.request("/api/me")).json()).email, null);
-    assert.equal((await (await f.request("/api/me", undefined, true)).json()).email, cfg.owner);
-  } finally { await f.cleanup(); }
+    assert.equal(
+      (await (await f.request("/api/me", undefined, true)).json()).email,
+      cfg.owner,
+    );
+  } finally {
+    await f.cleanup();
+  }
 });
 async function fixture() {
   const store = new Store(":memory:");
@@ -70,6 +75,48 @@ async function fixture() {
     },
   };
 }
+test("Preferences are owner-only, validated, persisted and do not change existing items", async () => {
+  const f = await fixture();
+  try {
+    assert.equal((await f.request("/api/preferences")).status, 401);
+    const original = f.store.create({
+      ...defaultFields("2026-09-14"),
+      title: "private",
+    });
+    const p = {
+      durationMinutes: 45,
+      showCompleted: false,
+      publicByDefault: true,
+      applyToApi: true,
+    };
+    assert.equal((await f.request("/api/preferences", p)).status, 401);
+    assert.equal(
+      (await f.request("/api/preferences", p, true, "https://evil.example"))
+        .status,
+      403,
+    );
+    for (const invalid of [
+      { ...p, durationMinutes: 0 },
+      { ...p, showCompleted: "false" },
+      { ...p, extra: true },
+      null,
+    ]) {
+      assert.equal(
+        (await f.request("/api/preferences", invalid, true)).status,
+        400,
+      );
+    }
+    assert.equal((await f.request("/api/preferences", p, true)).status, 200);
+    assert.deepEqual(
+      await (await f.request("/api/preferences", undefined, true)).json(),
+      p,
+    );
+    assert.deepEqual(JSON.parse(f.store.setting("preferences")!), p);
+    assert.deepEqual(f.store.item(original.id), original);
+  } finally {
+    await f.cleanup();
+  }
+});
 test("unauthenticated writes and reads are denied; foreign-origin writes denied", async () => {
   const f = await fixture();
   try {
@@ -147,10 +194,22 @@ test("shared projection hides private entries, rule details, reminders; link rot
 test("expired sessions cannot edit; logout invalidates the stored session", async () => {
   const f = await fixture();
   try {
-    f.store.db.prepare('UPDATE sessions SET expires=?').run(Date.now()-1);
-    assert.equal((await (await f.request('/api/me',undefined,true)).json()).owner,false);
-    assert.equal((await f.request('/api/items',{...defaultFields(),title:'expired'},true)).status,401);
-    f.store.db.prepare('UPDATE sessions SET expires=?').run(Date.now()+60000);
+    f.store.db.prepare("UPDATE sessions SET expires=?").run(Date.now() - 1);
+    assert.equal(
+      (await (await f.request("/api/me", undefined, true)).json()).owner,
+      false,
+    );
+    assert.equal(
+      (
+        await f.request(
+          "/api/items",
+          { ...defaultFields(), title: "expired" },
+          true,
+        )
+      ).status,
+      401,
+    );
+    f.store.db.prepare("UPDATE sessions SET expires=?").run(Date.now() + 60000);
     await f.request("/api/logout", {}, true);
     assert.equal((await f.request("/api/me", undefined, true)).status, 200);
     assert.equal(
@@ -244,12 +303,25 @@ test("expired trash is purged; recurring tombstones still suppress old deleted o
     s.db.prepare("UPDATE trash SET deleted_at=?").run(Date.now() - 31 * DAY);
     s.cleanup();
     assert.equal(s.trash().length, 0);
-    const repeating=s.create({...defaultFields('2026-09-01'),title:'반복',rule:{frequency:'daily',interval:1,weekdays:[0],monthly:'date',day:1,ordinal:1,weekday:0,until:null}});
-    s.mutate(repeating.id,'2026-09-01',1,'one',null,true);
-    s.db.prepare('UPDATE trash SET deleted_at=?').run(Date.now()-31*DAY);
+    const repeating = s.create({
+      ...defaultFields("2026-09-01"),
+      title: "반복",
+      rule: {
+        frequency: "daily",
+        interval: 1,
+        weekdays: [0],
+        monthly: "date",
+        day: 1,
+        ordinal: 1,
+        weekday: 0,
+        until: null,
+      },
+    });
+    s.mutate(repeating.id, "2026-09-01", 1, "one", null, true);
+    s.db.prepare("UPDATE trash SET deleted_at=?").run(Date.now() - 31 * DAY);
     s.cleanup();
-    assert.equal(s.trash().length,0);
-    assert.equal(s.list('2026-09-01','2026-09-02').length,0);
+    assert.equal(s.trash().length, 0);
+    assert.equal(s.list("2026-09-01", "2026-09-02").length, 0);
   } finally {
     s.db.close();
   }
@@ -286,16 +358,14 @@ test("notification worker sends once per due occurrence/device; completion cance
       end: new Date(now + 60000).toISOString(),
       reminder: 0,
     });
-    s.db
-      .prepare("INSERT INTO subscriptions VALUES(?,?,?)")
-      .run(
-        "device",
-        JSON.stringify({
-          endpoint: "https://fcm.googleapis.com/test",
-          keys: {},
-        }),
-        now - 60000,
-      );
+    s.db.prepare("INSERT INTO subscriptions VALUES(?,?,?)").run(
+      "device",
+      JSON.stringify({
+        endpoint: "https://fcm.googleapis.com/test",
+        keys: {},
+      }),
+      now - 60000,
+    );
     await worker.tick();
     await worker.tick();
     assert.equal(calls, 1);

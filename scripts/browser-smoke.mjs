@@ -93,6 +93,64 @@ try {
     .getByRole("button", { name: "설정", exact: true })
     .click();
   await page.getByRole("heading", { name: "계정", exact: true }).waitFor();
+  await page.getByLabel("기본 소요 시간 (분)").fill("45");
+  await page.getByLabel("완료 일정", { exact: true }).selectOption("false");
+  await page.getByLabel("새 일정의 공유 공개 기본값").selectOption("true");
+  await page.getByLabel("API 새 일정에도 기본값 적용").selectOption("true");
+  await page
+    .getByRole("button", { name: "기본 설정 저장", exact: true })
+    .click();
+  await page.getByText("기본 설정을 저장했습니다.", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "새 할 일", exact: true }).waitFor();
+  await page.waitForFunction(
+    () =>
+      !document
+        .querySelector(".filter-tabs button:last-child")
+        ?.textContent.includes("완료"),
+  );
+  assert.equal(await page.locator(".task-card.done").count(), 0);
+  await peer.waitForFunction(
+    () =>
+      document.querySelector(".filter-tabs") &&
+      !document
+        .querySelector(".filter-tabs button:last-child")
+        ?.textContent.includes("완료"),
+  );
+  await page.getByRole("button", { name: "새 할 일", exact: true }).click();
+  assert.equal(await page.getByLabel("공유 링크에 공개").isChecked(), true);
+  await page.getByLabel("일정 유형").selectOption("timed");
+  assert(
+    (await page.getByLabel("시작", { exact: true }).inputValue()).endsWith(
+      "T09:00",
+    ),
+  );
+  assert(
+    (await page.getByLabel("종료", { exact: true }).inputValue()).endsWith(
+      "T09:45",
+    ),
+  );
+  const newStart =
+    (await page.getByLabel("시작", { exact: true }).inputValue()).slice(0, 10) +
+    "T13:00";
+  await page.getByLabel("시작", { exact: true }).fill(newStart);
+  assert(
+    (await page.getByLabel("종료", { exact: true }).inputValue()).endsWith(
+      "T13:45",
+    ),
+  );
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  assert.equal(await page.getByLabel("기본 소요 시간 (분)").inputValue(), "45");
+  await page.getByLabel("기본 소요 시간 (분)").fill("60");
+  await page.getByLabel("완료 일정", { exact: true }).selectOption("true");
+  await page.getByLabel("새 일정의 공유 공개 기본값").selectOption("false");
+  await page.getByLabel("API 새 일정에도 기본값 적용").selectOption("false");
+  await page
+    .getByRole("button", { name: "기본 설정 저장", exact: true })
+    .click();
+  await page.getByText("기본 설정을 저장했습니다.", { exact: true }).waitFor();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "알림 설정", exact: true })

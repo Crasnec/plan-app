@@ -13,6 +13,7 @@ import {
   type Fields,
 } from "../shared/domain.js";
 import { agentSchema } from "./agent-schema.js";
+import { apiDefaults } from "./preferences.js";
 
 const scopes = ["items:read", "items:write", "items:delete"] as const;
 type AgentScope = (typeof scopes)[number];
@@ -374,7 +375,7 @@ export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
   router.post("/items", (req, res) =>
     mutation(req, res, "items:write", () => ({
       status: 201,
-      data: { item: store.create(req.body) },
+      data: { item: store.create(apiDefaults(store, req.body)) },
     })),
   );
   router.patch("/items/:id", (req, res) =>

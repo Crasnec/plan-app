@@ -16,6 +16,84 @@ const cfg: Config = {
   demo: false,
   production: false,
 };
+test("API defaults are opt-in, omission-only, and idempotent across preference changes", async () => {
+  const f = await fixture();
+  try {
+    const key = await f.issue(["items:read", "items:write"]);
+    const fields = {
+      ...defaultFields("2026-09-14"),
+      title: "defaults",
+      kind: "timed",
+      start: "2026-09-14T00:00:00.000Z",
+      end: undefined,
+      public: undefined,
+      reminder: null,
+    };
+    const create = (body: unknown, idempotency: string) =>
+      f.call("/api/agent/v1/items", {
+        method: "POST",
+        token: key.token,
+        body,
+        idempotency,
+      });
+    assert.equal((await create(fields, "defaults-off")).status, 400);
+    f.store.set(
+      "preferences",
+      JSON.stringify({
+        durationMinutes: 45,
+        showCompleted: false,
+        publicByDefault: true,
+        applyToApi: true,
+      }),
+    );
+    const result = await create(fields, "defaults-on");
+    assert.equal(result.status, 201);
+    assert.equal(result.data.item.public, true);
+    assert.equal(result.data.item.end, "2026-09-14T00:45:00.000Z");
+    const explicit = await create(
+      { ...fields, public: false, end: "2026-09-14T02:00:00.000Z" },
+      "explicit-values",
+    );
+    assert.equal(explicit.status, 201);
+    assert.equal(explicit.data.item.public, false);
+    assert.equal(explicit.data.item.end, "2026-09-14T02:00:00.000Z");
+    assert.equal(
+      (await create({ ...fields, public: null }, "invalid-null")).status,
+      400,
+    );
+    assert.equal(
+      (
+        await create(
+          { ...fields, kind: "all_day", start: "2026-09-14" },
+          "missing-day-end",
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      (await f.call("/api/preferences", { token: key.token })).status,
+      401,
+    );
+    assert.equal(
+      (await f.call("/api/preferences", { token: key.token, session: true }))
+        .status,
+      403,
+    );
+    f.store.set(
+      "preferences",
+      JSON.stringify({
+        durationMinutes: 120,
+        showCompleted: true,
+        publicByDefault: false,
+        applyToApi: false,
+      }),
+    );
+    const replay = await create(fields, "defaults-on");
+    assert.deepEqual(replay.data, result.data);
+  } finally {
+    await f.cleanup();
+  }
+});
 async function fixture() {
   const store = new Store(":memory:");
   store.set("owner_sub", "test-google-sub");

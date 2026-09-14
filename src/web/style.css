@@ -1824,6 +1824,24 @@ nav button.active {
 .settings-account h3 {
   font-size: 14px;
 }
+.preferences-fields {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 0;
+}
+.preferences-fields label {
+  display: block;
+  margin: 12px 0;
+}
+.preferences-fields input,
+.preferences-fields select {
+  width: 100%;
+}
+.preferences-fields .muted {
+  font-size: 12px;
+  line-height: 1.7;
+}
 .settings-account button {
   display: inline-flex;
   align-items: center;
