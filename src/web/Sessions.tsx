@@ -49,8 +49,8 @@ export function Sessions({
         별도 세션입니다. 시간은 한국 시간 기준입니다.
       </p>
       <p className="muted">
-        로그아웃해도 일정은 삭제되지 않습니다. API·MCP 연결은 설정의 API 키
-        관리에서 별도로 폐기하세요.
+        로그아웃해도 일정은 삭제되지 않습니다. API 키는 ‘API 키 관리’, MCP는
+        ‘MCP 연결’ 메뉴에서 별도로 폐기하세요.
       </p>
       {notice && <p role="status">{notice}</p>}
       {error && (

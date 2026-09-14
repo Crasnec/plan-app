@@ -7,6 +7,9 @@ import { hash } from "../src/server/auth.js";
 import type { Config } from "../src/server/config.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const cfg: Config = {
   origin: "http://localhost:3000",
   owner: "owner@example.com",
@@ -19,8 +22,8 @@ const cfg: Config = {
   production: false,
 };
 const callback = "https://chatgpt.com/connector/oauth/test-client";
-async function fixture() {
-  const store = new Store(":memory:");
+async function fixture(path = ":memory:") {
+  const store = new Store(path);
   store.set("owner_sub", "google-owner");
   store.db
     .prepare("INSERT INTO sessions VALUES(?,?)")
@@ -409,5 +412,127 @@ test("Official MCP client completes the Streamable HTTP lifecycle", async () => 
   } finally {
     await client.close();
     await f.cleanup();
+  }
+});
+test("MCP connections remain renewable after 45 days and explicit revocation ends access", async () => {
+  const f = await fixture();
+  const realNow = Date.now;
+  try {
+    const { flow, tokens } = await f.connect();
+    const metadata = await (
+      await f.request("/api/agent-keys", {
+        headers: { Cookie: "plan_session=session" },
+      })
+    ).json();
+    const connection = metadata.keys.find(
+      (key: { kind: string }) => key.kind === "mcp",
+    );
+    assert.equal(connection.expiresAt, null);
+    Date.now = () => realNow() + 45 * 86400000;
+    assert.equal((await f.rpc(tokens.access_token, "tools/list")).status, 401);
+    const refreshBody = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: flow.client.client_id,
+      refresh_token: tokens.refresh_token,
+      resource: `${cfg.origin}/mcp`,
+    });
+    const renewed = await f.form("/token", refreshBody);
+    assert.equal(renewed.status, 200);
+    const next = await renewed.json();
+    assert.equal((await f.rpc(next.access_token, "tools/list")).status, 200);
+    f.store.db.prepare("UPDATE sessions SET expires=?").run(Date.now() + 60000);
+    const revoke = await f.request(`/api/agent-keys/${connection.id}/revoke`, {
+      method: "POST",
+      headers: {
+        Cookie: "plan_session=session",
+        Origin: cfg.origin,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+    assert.equal(revoke.status, 200);
+    assert.equal((await f.rpc(next.access_token, "tools/list")).status, 401);
+    refreshBody.set("refresh_token", next.refresh_token);
+    assert.equal((await f.form("/token", refreshBody)).status, 400);
+  } finally {
+    Date.now = realNow;
+    await f.cleanup();
+  }
+});
+test("Migration extends only active MCP grants and preserves ordinary API key expiry", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "plan-mcp-migrate-"));
+  const path = join(dir, "plan.sqlite");
+  const f = await fixture(path);
+  const legacyExpiry = Date.now() + 30 * 86400000;
+  try {
+    await f.connect();
+    const revoked = await f.connect();
+    const grant = JSON.parse(
+      f.store.db
+        .prepare("SELECT data FROM mcp_oauth WHERE id=?")
+        .get(hash(revoked.tokens.access_token))!.data as string,
+    );
+    f.store.db
+      .prepare("UPDATE agent_keys SET revoked_at=? WHERE id=?")
+      .run(Date.now(), grant.keyId);
+    f.store.db.prepare("UPDATE agent_keys SET expires_at=?").run(legacyExpiry);
+    f.store.db
+      .prepare(
+        "UPDATE mcp_oauth SET expires=? WHERE kind IN ('refresh','used_refresh')",
+      )
+      .run(legacyExpiry);
+    f.store.db
+      .prepare("INSERT INTO agent_keys VALUES(?,?,?,?,?,?,?,?,?,?)")
+      .run(
+        "api-only",
+        "ordinary",
+        hash("api-only-secret"),
+        '["items:read"]',
+        cfg.owner,
+        "google-owner",
+        Date.now(),
+        legacyExpiry,
+        null,
+        null,
+      );
+    f.store.db.exec(
+      "DELETE FROM mcp_connections; DELETE FROM migrations WHERE version=5",
+    );
+  } finally {
+    await f.cleanup();
+  }
+  const migrated = new Store(path);
+  try {
+    assert.equal(
+      migrated.db.prepare("SELECT count(*) AS n FROM mcp_connections").get()!.n,
+      1,
+    );
+    assert.equal(
+      migrated.db
+        .prepare("SELECT expires_at FROM agent_keys WHERE id='api-only'")
+        .get()!.expires_at,
+      legacyExpiry,
+    );
+    assert.equal(
+      migrated.db
+        .prepare(
+          "SELECT count(*) AS n FROM agent_keys WHERE revoked_at IS NOT NULL",
+        )
+        .get()!.n,
+      1,
+    );
+    assert(
+      Number(
+        migrated.db
+          .prepare(
+            "SELECT max(expires) AS expiry FROM mcp_oauth WHERE kind='refresh'",
+          )
+          .get()!.expiry,
+      ) >
+        Date.now() + 100 * 365 * 86400000,
+    );
+  } finally {
+    migrated.db.close();
+    await rm(dir, { recursive: true, force: true });
   }
 });

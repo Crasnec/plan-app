@@ -887,7 +887,15 @@ function App() {
             notify("기본 설정을 저장했습니다.");
           }}
           onClose={() => setPanel(null)}
-          onOpen={setPanel}
+          renderPanel={(selectedPanel) => (
+            <Settings
+              panel={selectedPanel}
+              me={me}
+              onClose={() => setPanel(null)}
+              onChange={load}
+              notify={notify}
+            />
+          )}
           onLogout={logout}
         />
       )}

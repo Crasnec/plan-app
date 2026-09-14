@@ -1,20 +1,60 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+} from "react";
+import { SettingsContext } from "./SettingsContext.js";
 import { Icon } from "./icons.js";
-export function Modal({
-  title,
-  onClose,
-  children,
-  wide = false,
-  busy = false,
-  onBack,
-}: {
+type ModalProps = {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
   busy?: boolean;
   onBack?: () => void;
-}) {
+  canLeave?: () => boolean;
+  className?: string;
+};
+export function Modal(props: ModalProps) {
+  const context = useContext(SettingsContext);
+  return context ? <EmbeddedPanel {...props} /> : <Dialog {...props} />;
+}
+function EmbeddedPanel({
+  title,
+  children,
+  busy = false,
+  canLeave,
+}: ModalProps) {
+  const context = useContext(SettingsContext)!;
+  useLayoutEffect(() => {
+    context.guard.current = () => !busy && (!canLeave || canLeave());
+    context.setBusy(busy);
+  });
+  useLayoutEffect(
+    () => () => {
+      context.guard.current = () => true;
+      context.setBusy(false);
+    },
+    [context],
+  );
+  return (
+    <section className="settings-embedded" aria-label={title}>
+      <h3>{title}</h3>
+      {children}
+    </section>
+  );
+}
+function Dialog({
+  title,
+  onClose,
+  children,
+  wide = false,
+  busy = false,
+  onBack,
+  className = "",
+}: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const d = ref.current!;
@@ -24,7 +64,7 @@ export function Modal({
   return (
     <dialog
       ref={ref}
-      className={wide ? "modal wide" : "modal"}
+      className={`${wide ? "modal wide" : "modal"} ${className}`}
       onCancel={(e) => {
         e.preventDefault();
         if (!busy) onClose();

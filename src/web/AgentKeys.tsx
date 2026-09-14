@@ -8,6 +8,7 @@ type Key = {
   expiresAt: string;
   revokedAt: string | null;
   lastUsedAt: string | null;
+  kind?: "api" | "mcp";
 };
 const date = (value: string) =>
   new Intl.DateTimeFormat("ko-KR", {
@@ -35,7 +36,11 @@ export function AgentKeys({
   const [saved, setSaved] = useState(false),
     [confirm, setConfirm] = useState<Key | null>(null);
   const refresh = async () =>
-    setKeys((await api<{ keys: Key[] }>("/agent-keys")).keys);
+    setKeys(
+      (await api<{ keys: Key[] }>("/agent-keys")).keys.filter(
+        (key) => key.kind !== "mcp",
+      ),
+    );
   useEffect(() => {
     void refresh()
       .catch((e) => setError(e.message))
@@ -101,6 +106,15 @@ export function AgentKeys({
       onClose={() => leave(onClose)}
       onBack={onBack ? () => leave(onBack) : undefined}
       busy={busy}
+      canLeave={() => {
+        if (issued && !saved) {
+          setError(
+            "키를 복사하거나 안전한 곳에 저장한 뒤 ‘안전하게 저장했습니다’를 선택해 주세요.",
+          );
+          return false;
+        }
+        return true;
+      }}
     >
       <div className="settings-content agent-keys">
         <p>
@@ -169,7 +183,7 @@ export function AgentKeys({
                 setNotice("");
               }}
             >
-              확인
+              키 보관 완료
             </button>
           </section>
         ) : (
