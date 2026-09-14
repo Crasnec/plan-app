@@ -122,6 +122,31 @@ export function SettingsHome({
             </button>
           </fieldset>
         </form>
+        <section
+          className="settings-account"
+          aria-labelledby="mcp-settings-title"
+        >
+          <h3 id="mcp-settings-title">ChatGPT · MCP 연결</h3>
+          <label>
+            MCP 서버 주소
+            <input
+              aria-label="MCP 서버 주소"
+              readOnly
+              value={`${location.origin}/mcp`}
+              onFocus={(e) => e.currentTarget.select()}
+            />
+          </label>
+          <p className="muted">
+            ChatGPT 웹의 개발자 모드에서 이 주소를 추가하고 OAuth 인증·동적
+            클라이언트 등록(DCR)을 선택하세요. 클라이언트 ID와 비밀번호는 직접
+            입력하지 않습니다.
+          </p>
+          <p className="muted">
+            Google 소유자 로그인 후 필요한 권한을 승인하세요. 연결은 30일간
+            유효하며, 아래 API 키 관리에서 ‘MCP · ChatGPT’를 폐기하면 연결이
+            해제됩니다.
+          </p>
+        </section>
         <nav className="settings-menu" aria-label="설정 항목">
           {(
             [

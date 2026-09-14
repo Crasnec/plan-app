@@ -18,6 +18,7 @@ import { errorPage } from "./error-page.js";
 import { History } from "./history.js";
 import { preferences } from "./preferences.js";
 import { validPreferences } from "../shared/preferences.js";
+import { mountMcp } from "./mcp.js";
 
 export function createApp(
   store: Store,
@@ -52,6 +53,7 @@ export function createApp(
     next();
   });
   app.use(express.json({ limit: "32kb" }));
+  mountMcp(app, store, cfg, broadcast);
   app.use("/api/agent/v1", agentRouter(store, cfg, broadcast));
   app.use((req, _res, next) => {
     if (
