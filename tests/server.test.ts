@@ -27,6 +27,13 @@ const cfg: Config = {
   demo: false,
   production: false,
 };
+test("Account email is returned only to the owner session", async () => {
+  const f = await fixture();
+  try {
+    assert.equal((await (await f.request("/api/me")).json()).email, null);
+    assert.equal((await (await f.request("/api/me", undefined, true)).json()).email, cfg.owner);
+  } finally { await f.cleanup(); }
+});
 async function fixture() {
   const store = new Store(":memory:");
   const { app, close } = createApp(store, cfg);

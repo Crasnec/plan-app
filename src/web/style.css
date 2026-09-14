@@ -1781,3 +1781,47 @@ nav button.active {
   padding: 6px;
   border: 0;
 }
+.settings-menu {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0;
+}
+.settings-menu button {
+  display: flex;
+  align-items: center;
+  text-align: left;
+  gap: 12px;
+  padding: 16px;
+  min-width: 0;
+}
+.settings-menu button > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.settings-menu strong,
+.settings-menu small {
+  display: block;
+}
+.settings-menu small {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settings-account {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  margin-top: 24px;
+  overflow-wrap: anywhere;
+}
+.settings-account h3 {
+  font-size: 14px;
+}
+.settings-account button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.header-settings {
+  flex-shrink: 0;
+}

@@ -6,6 +6,7 @@ import { Calendar, range, type View } from "./Calendar.js";
 import { Editor } from "./Editor.js";
 import { Modal } from "./Modal.js";
 import { AgentKeys } from "./AgentKeys.js";
+import { SettingsHome } from "./SettingsHome.js";
 import { Markdown } from "./Markdown.js";
 import {
   today,
@@ -84,7 +85,7 @@ function App() {
       date: string | null;
     } | null>(null),
     [panel, setPanel] = useState<
-      "share" | "trash" | "notifications" | "keys" | null
+      "settings" | "share" | "trash" | "notifications" | "keys" | null
     >(null);
   const [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
@@ -437,17 +438,9 @@ function App() {
         <div className="sidebar-bottom">
           {!readOnly && (
             <>
-              <button onClick={() => setPanel("share")}>
-                <Icon name="link" />
-                공유 링크
-              </button>
-              <button onClick={() => setPanel("notifications")}>
-                <Icon name="bell" />
-                알림 설정
-              </button>
-              <button onClick={() => setPanel("keys")}>
-                <Icon name="link" />
-                API 키 관리
+              <button onClick={() => setPanel("settings")}>
+                <Icon name="settings" />
+                설정
               </button>
               <button onClick={() => setPanel("trash")}>
                 <Icon name="trash" />
@@ -463,11 +456,6 @@ function App() {
                 {shared ? "읽기 전용" : me.demo ? "로컬 미리보기" : "개인 일정"}
               </small>
             </div>
-            {!readOnly && !me.demo && (
-              <button aria-label="로그아웃" onClick={() => void logout()}>
-                <Icon name="logout" size={18} />
-              </button>
-            )}
           </div>
         </div>
       </aside>
@@ -499,11 +487,12 @@ function App() {
             {!readOnly && (
               <>
                 <button
-                  className="mobile-settings icon-button"
-                  aria-label="공유 및 설정"
-                  onClick={() => setPanel("share")}
+                  className="header-settings icon-button"
+                  aria-label="설정"
+                  title="설정"
+                  onClick={() => setPanel("settings")}
                 >
-                  <Icon name="link" />
+                  <Icon name="settings" />
                 </button>
                 <button
                   className="primary"
@@ -555,15 +544,6 @@ function App() {
           </button>
           {!readOnly && (
             <>
-              <button onClick={() => setPanel("keys")} aria-label="API 키 관리">
-                API 키
-              </button>
-              <button
-                onClick={() => setPanel("notifications")}
-                aria-label="알림"
-              >
-                <Icon name="bell" size={18} />
-              </button>
               <button onClick={() => setPanel("trash")} aria-label="휴지통">
                 <Icon name="trash" size={18} />
               </button>
@@ -875,12 +855,26 @@ function App() {
           </button>
         </Modal>
       )}
-      {panel === "keys" && <AgentKeys onClose={() => setPanel(null)} />}
-      {panel && panel !== "keys" && (
+      {panel === "settings" && (
+        <SettingsHome
+          me={me}
+          onClose={() => setPanel(null)}
+          onOpen={setPanel}
+          onLogout={logout}
+        />
+      )}
+      {panel === "keys" && (
+        <AgentKeys
+          onClose={() => setPanel(null)}
+          onBack={() => setPanel("settings")}
+        />
+      )}
+      {panel && panel !== "keys" && panel !== "settings" && (
         <Settings
           panel={panel}
           me={me}
           onClose={() => setPanel(null)}
+          onBack={panel === "trash" ? undefined : () => setPanel("settings")}
           onChange={load}
           notify={notify}
         />
@@ -936,12 +930,14 @@ function Settings({
   onClose,
   onChange,
   notify,
+  onBack,
 }: {
   panel: "share" | "trash" | "notifications";
   me: Me;
   onClose: () => void;
   onChange: () => Promise<void>;
   notify: (s: string, undoable?: boolean) => void;
+  onBack?: () => void;
 }) {
   const [trash, setTrash] = useState<
       { id: string; title: string; deleted_at: number }[]
@@ -1007,6 +1003,7 @@ function Settings({
   return (
     <Modal
       busy={busy}
+      onBack={onBack}
       title={
         panel === "share"
           ? "공유 링크"

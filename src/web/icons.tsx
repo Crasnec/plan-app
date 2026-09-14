@@ -1,5 +1,6 @@
 export function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, string> = {
+    settings: "M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6M10 15v6",
     plus: "M12 5v14M5 12h14",
     check: "m5 12 4 4L19 6",
     left: "m14 6-6 6 6 6",

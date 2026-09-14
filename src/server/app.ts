@@ -66,6 +66,7 @@ export function createApp(
   app.get("/api/me", (req, res) =>
     res.json({
       owner: owner(req, store, cfg),
+      email: !cfg.demo && owner(req, store, cfg) ? cfg.owner : null,
       demo: cfg.demo,
       loginReady: !!cfg.clientId && !!cfg.clientSecret,
       pushKey: cfg.vapidPublic,

@@ -77,8 +77,27 @@ try {
     path: "artifacts/desktop-month.png",
     fullPage: true,
   });
+  const openSettings = async (name) => {
+    await page.locator(".header-settings").click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name, exact: true })
+      .click();
+  };
   await page
     .locator(".sidebar-bottom")
+    .getByRole("button", { name: "설정", exact: true })
+    .click();
+  await page.getByRole("heading", { name: "계정", exact: true }).waitFor();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "알림 설정", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "설정으로 돌아가기", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
     .getByRole("button", { name: "API 키 관리", exact: true })
     .click();
   await page.getByLabel("키 이름", { exact: true }).fill("브라우저 테스트 키");
@@ -87,6 +106,14 @@ try {
     .getByLabel("발급된 API 키", { exact: true })
     .inputValue();
   assert.match(apiKey, /^plan_agent_/);
+  await page
+    .getByRole("button", { name: "설정으로 돌아가기", exact: true })
+    .click();
+  await page.getByRole("alert").waitFor();
+  assert.equal(
+    await page.getByLabel("발급된 API 키", { exact: true }).count(),
+    1,
+  );
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("alert").waitFor();
   await page.getByLabel("안전하게 저장했습니다").check();
@@ -101,8 +128,18 @@ try {
   assert.equal(authorized.status(), 200);
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".header-settings").click();
+  assert(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await page.screenshot({
+    path: "artifacts/mobile-settings.png",
+    fullPage: false,
+  });
   await page
-    .locator(".mobile-nav")
+    .getByRole("dialog")
     .getByRole("button", { name: "API 키 관리", exact: true })
     .click();
   await page
@@ -404,10 +441,7 @@ try {
     .locator(".view-switch")
     .getByRole("button", { name: "주", exact: true })
     .click();
-  await page
-    .locator(".sidebar-bottom")
-    .getByRole("button", { name: "공유 링크", exact: true })
-    .click();
+  await openSettings("공유 링크");
   await page
     .getByRole("button", { name: "공유 링크 만들기", exact: true })
     .click();
