@@ -47,7 +47,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS agent_requests(key_id TEXT NOT NULL REFERENCES agent_keys(id), request_key TEXT NOT NULL, fingerprint TEXT NOT NULL, status INTEGER NOT NULL, response TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(key_id,request_key));
       CREATE TABLE IF NOT EXISTS agent_audit(id TEXT PRIMARY KEY, key_id TEXT NOT NULL REFERENCES agent_keys(id), method TEXT NOT NULL, action TEXT NOT NULL, status INTEGER NOT NULL, created_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS agent_audit_time ON agent_audit(created_at);
-      INSERT OR IGNORE INTO migrations(version) VALUES(2);`);
+      INSERT OR IGNORE INTO migrations(version) VALUES(2);
+      CREATE TABLE IF NOT EXISTS mcp_oauth(id TEXT PRIMARY KEY, kind TEXT NOT NULL, expires INTEGER NOT NULL, data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS mcp_oauth_expiry ON mcp_oauth(expires);
+      INSERT OR IGNORE INTO migrations(version) VALUES(3);`);
   }
   transaction<T>(fn: () => T): T {
     if (this.transactionActive) return fn();
@@ -409,6 +412,7 @@ export class Store {
         this.db.prepare("DELETE FROM items WHERE id=?").run(item.id);
     this.db.prepare("DELETE FROM sessions WHERE expires<?").run(now);
     this.db.prepare("DELETE FROM oauth WHERE expires<?").run(now);
+    this.db.prepare("DELETE FROM mcp_oauth WHERE expires<=?").run(now);
     this.db.prepare("DELETE FROM deliveries WHERE due<?").run(now - 30 * DAY);
   }
 }

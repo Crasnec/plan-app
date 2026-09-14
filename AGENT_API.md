@@ -2,7 +2,7 @@
 
 기본 주소: `https://plan.crasnec.com/api/agent/v1`
 
-PC·모바일 모두 ‘설정 → API 키 관리’에서 키를 발급·복사·폐기할 수 있다. MCP는 제공하지 않는다. 기존 브라우저 로그인 세션과 분리된 Bearer 키를 사용한다. 현재 앱은 Google OAuth **클라이언트**이며 에이전트용 OAuth 인증 서버나 자체 토큰 교환 엔드포인트는 제공하지 않는다.
+PC·모바일 모두 ‘설정 → API 키 관리’에서 키를 발급·복사·폐기할 수 있다. REST API는 기존 브라우저 로그인 세션과 분리된 Bearer 키를 사용한다. ChatGPT용 MCP는 별도 OAuth 연결을 사용하며 [MCP.md](MCP.md)에 연결 방법을 설명한다. MCP 접근 토큰과 REST API 키는 서로 바꿔 사용할 수 없다.
 
 ## 새 일정 기본값
 
@@ -154,6 +154,6 @@ Google 공급자의 OAuth 엔드포인트:
 | Authorization | `https://accounts.google.com/o/oauth2/v2/auth` |
 | Token | `https://oauth2.googleapis.com/token` |
 
-Google 토큰은 앱의 소유자 로그인에 사용되며 에이전트 API 키를 대체하지 않는다. 현재 앱에 `/oauth/authorize` 또는 `/oauth/token`은 없다. API 키 인증을 지원하는 에이전트 클라이언트에서 연결한다.
+Google 토큰은 앱의 소유자 로그인에 사용되며 에이전트 API 키를 대체하지 않는다. REST API는 API 키 인증을 사용한다. ChatGPT MCP 연결은 별도의 `/authorize`, `/token`, `/register`, `/revoke`를 사용하며 상세 주소는 [MCP.md](MCP.md)에 있다. `/oauth/authorize`와 `/oauth/token` 경로는 제공하지 않는다.
 
 공식 참고: [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect), [OWASP REST Security](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html).

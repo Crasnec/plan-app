@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
+import { randomBytes, createHash } from "node:crypto";
 const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE
     ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href
@@ -73,6 +74,54 @@ try {
   await peer.goto(origin);
   await peer.locator(".task-card").first().waitFor();
   await mkdir("artifacts", { recursive: true });
+  const mcpClientResponse = await page.request.post(`${origin}/register`, {
+    data: {
+      client_name: "ChatGPT browser test",
+      redirect_uris: ["https://chatgpt.com/connector/oauth/browser-test"],
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+    },
+  });
+  assert.equal(mcpClientResponse.status(), 201);
+  const mcpClient = await mcpClientResponse.json();
+  const verifier = randomBytes(32).toString("base64url");
+  const authorization = new URLSearchParams({
+    client_id: mcpClient.client_id,
+    redirect_uri: "https://chatgpt.com/connector/oauth/browser-test",
+    response_type: "code",
+    scope: "items:read items:write items:delete",
+    state: "browser-state",
+    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge_method: "S256",
+    resource: `${origin}/mcp`,
+  });
+  const consent = await context.newPage();
+  await consent.setViewportSize({ width: 390, height: 844 });
+  await consent.goto(`${origin}/authorize?${authorization}`);
+  await consent.getByRole("heading", { name: "ChatGPT 연결 승인" }).waitFor();
+  assert.equal(
+    await consent
+      .getByRole("checkbox", { name: "일정 등록·수정·완료·복구" })
+      .isChecked(),
+    false,
+  );
+  assert.equal(
+    await consent
+      .getByRole("checkbox", { name: "일정 삭제 (휴지통으로 이동)" })
+      .isChecked(),
+    false,
+  );
+  assert(
+    await consent.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await consent.screenshot({
+    path: "artifacts/mobile-mcp-consent.png",
+    fullPage: true,
+  });
+  await consent.close();
   await page.screenshot({
     path: "artifacts/desktop-month.png",
     fullPage: true,

@@ -58,7 +58,7 @@ export function authRoutes(
     sameSite: "lax" as const,
     path: "/",
   };
-  app.get("/auth/google", async (_req, res) => {
+  app.get("/auth/google", async (req, res) => {
     limit("start", 5, res);
     if (!cfg.clientId || !cfg.clientSecret)
       throw new HttpError(
@@ -68,6 +68,11 @@ export function authRoutes(
     const state = token(),
       nonce = token(),
       verifier = token();
+    const returnTo =
+      typeof req.query.returnTo === "string" &&
+      /^\/mcp\/connect\?ticket=[A-Za-z0-9_-]{43}$/.test(req.query.returnTo)
+        ? req.query.returnTo
+        : "/";
     store.transaction(() => {
       store.db.prepare("DELETE FROM oauth WHERE expires<=?").run(Date.now());
       if (
@@ -82,7 +87,7 @@ export function authRoutes(
         .run(
           hash(state),
           Date.now() + 600000,
-          JSON.stringify({ nonce, verifier }),
+          JSON.stringify({ nonce, verifier, returnTo }),
         );
     });
     res.cookie("plan_oauth", state, { ...options, maxAge: 600000 });
@@ -123,7 +128,7 @@ export function authRoutes(
       typeof req.query.code !== "string"
     )
       throw new HttpError(400, "로그인을 완료하지 못했습니다.");
-    const { nonce, verifier } = JSON.parse(row.data as string);
+    const { nonce, verifier, returnTo } = JSON.parse(row.data as string);
     const { tokens } = await oauth.getToken({
       code: req.query.code,
       codeVerifier: verifier,
@@ -151,7 +156,12 @@ export function authRoutes(
       .prepare("INSERT INTO sessions VALUES(?,?)")
       .run(hash(session), Date.now() + 30 * 86400000);
     res.cookie("plan_session", session, { ...options, maxAge: 30 * 86400000 });
-    res.redirect("/");
+    res.redirect(
+      typeof returnTo === "string" &&
+        /^\/mcp\/connect\?ticket=[A-Za-z0-9_-]{43}$/.test(returnTo)
+        ? returnTo
+        : "/",
+    );
   });
   app.post("/api/logout", (req, res) => {
     const sessionHash = hash(cookie(req, "plan_session"));
