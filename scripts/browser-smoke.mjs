@@ -137,6 +137,77 @@ try {
       .getByRole("button", { name, exact: true })
       .click();
   };
+  await openSettings("세션 관리");
+  await page.getByText("로컬 데모에는 로그인 세션이 없습니다.").waitFor();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  let browserSessions = [
+    {
+      id: "this-browser",
+      device: "Android · Chrome",
+      current: true,
+      createdAt: "2026-09-14T00:00:00.000Z",
+      lastSeenAt: "2026-09-14T00:00:00.000Z",
+      expiresAt: "2026-10-14T00:00:00.000Z",
+    },
+    {
+      id: "other-browser",
+      device: "Windows · Edge",
+      current: false,
+      createdAt: null,
+      lastSeenAt: null,
+      expiresAt: "2026-10-14T00:00:00.000Z",
+    },
+  ];
+  await page.route("**/api/sessions", (route) =>
+    route.fulfill({ json: { sessions: browserSessions, demo: false } }),
+  );
+  await page.route("**/api/sessions/other-browser/revoke", (route) => {
+    assert.equal(route.request().method(), "POST");
+    browserSessions = browserSessions.filter((s) => s.current);
+    return route.fulfill({ json: { current: false } });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openSettings("세션 관리");
+  await page.locator(".current-session").waitFor();
+  assert.equal(await page.getByText("이 기기", { exact: true }).count(), 1);
+  assert(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await page.screenshot({
+    path: "artifacts/mobile-sessions.png",
+    fullPage: false,
+  });
+  await page
+    .getByRole("button", { name: "이 기기 로그아웃", exact: true })
+    .click();
+  await page
+    .getByRole("heading", { name: "이 기기를 로그아웃할까요?" })
+    .waitFor();
+  await page.getByRole("button", { name: "취소", exact: true }).click();
+  await page
+    .locator(".session-card")
+    .filter({ hasText: "Windows · Edge" })
+    .getByRole("button", { name: "로그아웃", exact: true })
+    .click();
+  await page.getByRole("button", { name: "로그아웃하기", exact: true }).click();
+  await page.getByText("선택한 세션을 로그아웃했습니다.").waitFor();
+  assert.equal(await page.locator(".session-card").count(), 1);
+  assert.equal(
+    await page
+      .getByRole("button", { name: "다른 기기 모두 로그아웃" })
+      .isDisabled(),
+    true,
+  );
+  await page
+    .getByRole("button", { name: "설정으로 돌아가기", exact: true })
+    .click();
+  await page.getByRole("heading", { name: "설정", exact: true }).waitFor();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.unroute("**/api/sessions");
+  await page.unroute("**/api/sessions/other-browser/revoke");
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page
     .locator(".sidebar-bottom")
     .getByRole("button", { name: "설정", exact: true })

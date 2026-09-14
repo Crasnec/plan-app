@@ -14,7 +14,7 @@ export function SettingsHome({
 }: {
   me: Me;
   onClose: () => void;
-  onOpen: (panel: "share" | "notifications" | "keys") => void;
+  onOpen: (panel: "share" | "notifications" | "keys" | "sessions") => void;
   onLogout: () => Promise<void>;
   preferences: Preferences;
   onSave: (value: Preferences) => Promise<void>;
@@ -151,6 +151,7 @@ export function SettingsHome({
           {(
             [
               ["share", "link", "공유 링크", "공개 일정의 읽기 전용 링크 관리"],
+              ["sessions", "lock", "세션 관리", "로그인한 기기 확인·로그아웃"],
               [
                 "notifications",
                 "bell",
