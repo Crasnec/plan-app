@@ -7,6 +7,7 @@ import { Editor } from "./Editor.js";
 import { Modal } from "./Modal.js";
 import { AgentKeys } from "./AgentKeys.js";
 import { SettingsHome } from "./SettingsHome.js";
+import { defaultPreferences, type Preferences } from "../shared/preferences.js";
 import { Markdown } from "./Markdown.js";
 import {
   today,
@@ -30,6 +31,8 @@ const weekdays = [
   "토요일",
 ];
 function App() {
+  const [preferences, setPreferences] =
+    useState<Preferences>(defaultPreferences);
   type HistoryState = {
     undo: { id: string; label: string } | null;
     redo: { id: string; label: string } | null;
@@ -115,7 +118,11 @@ function App() {
   const loadSequence = useRef(0);
   useEffect(() => {
     api<Me>("/me")
-      .then(setMe)
+      .then(async (value) => {
+        if (value.owner && !shared)
+          setPreferences(await api<Preferences>("/preferences"));
+        setMe(value);
+      })
       .catch((e) => {
         setError(e.message);
         setLoading(false);
@@ -129,14 +136,20 @@ function App() {
     const r = range(date, view);
     const sequence = ++loadSequence.current;
     try {
-      const [data, historyState] = await Promise.all([
+      const [data, historyState, prefs] = await Promise.all([
         api<Occurrence[]>(
           `/items?from=${r.from}&to=${r.to}${shared ? `&share=${encodeURIComponent(shared)}` : ""}`,
         ),
         shared ? Promise.resolve(null) : api<HistoryState>("/history"),
+        shared
+          ? Promise.resolve(defaultPreferences)
+          : api<Preferences>("/preferences"),
       ]);
       if (sequence !== loadSequence.current) return;
       setEvents(data);
+      setPreferences(prefs);
+      if (!prefs.showCompleted)
+        setFilter((value) => (value === "done" ? "all" : value));
       if (historyState) updateHistory(historyState);
       setError("");
     } catch (e) {
@@ -197,7 +210,9 @@ function App() {
     return () => clearTimeout(timer);
   }, [notice, noticeHistory]);
   const filtered = events.filter(
-    (e) => filter === "all" || (filter === "done" ? e.done : !e.done),
+    (e) =>
+      (preferences.showCompleted || !e.done) &&
+      (filter === "all" || (filter === "done" ? e.done : !e.done)),
   );
   const list = filtered.filter((e) =>
     undated
@@ -668,16 +683,18 @@ function App() {
                 ["all", "전체"],
                 ["pending", "진행 중"],
                 ["done", "완료"],
-              ].map(([v, t]) => (
-                <button
-                  key={v}
-                  aria-pressed={filter === v}
-                  className={filter === v ? "active" : ""}
-                  onClick={() => setFilter(v)}
-                >
-                  {t}
-                </button>
-              ))}
+              ]
+                .filter(([v]) => preferences.showCompleted || v !== "done")
+                .map(([v, t]) => (
+                  <button
+                    key={v}
+                    aria-pressed={filter === v}
+                    className={filter === v ? "active" : ""}
+                    onClick={() => setFilter(v)}
+                  >
+                    {t}
+                  </button>
+                ))}
             </div>
             <div className="task-list" aria-busy={loading}>
               {list.length ? (
@@ -782,6 +799,7 @@ function App() {
           key={editor.event?.id || "new"}
           {...editor}
           readOnly={readOnly}
+          preferences={preferences}
           onClose={() => setEditor(null)}
           onSave={async (f, scope) => {
             if (editor.event && sameFields(editor.event, f)) return;
@@ -855,6 +873,12 @@ function App() {
       {panel === "settings" && (
         <SettingsHome
           me={me}
+          preferences={preferences}
+          onSave={async (value) => {
+            await api<Preferences>("/preferences", value);
+            await load();
+            notify("기본 설정을 저장했습니다.");
+          }}
           onClose={() => setPanel(null)}
           onOpen={setPanel}
           onLogout={logout}

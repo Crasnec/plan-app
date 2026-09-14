@@ -151,9 +151,9 @@ export function agentSchema(origin: string) {
         post: {
           operationId: "createItem",
           description:
-            "items:write. All fields required; default private, incomplete; recurring items cannot be created complete.",
+            "items:write. All fields required unless the owner enables API defaults: then public may be omitted, and end may be omitted for timed items (start + default duration). Explicit values always win; null is not omission. Existing items and PATCH are unaffected. Recurring items cannot be created complete.",
           parameters: [idempotency],
-          requestBody: body({ $ref: "#/components/schemas/Fields" }),
+          requestBody: body({ $ref: "#/components/schemas/CreateFields" }),
           responses: {
             ...errors,
             "201": json({
@@ -292,6 +292,15 @@ export function agentSchema(origin: string) {
         Fields: {
           type: "object",
           required: Object.keys(fields),
+          properties: fields,
+        },
+        CreateFields: {
+          type: "object",
+          description:
+            "public and end are conditionally required: omission requires owner API defaults enabled, and end omission also requires kind=timed.",
+          required: Object.keys(fields).filter(
+            (key) => key !== "public" && key !== "end",
+          ),
           properties: fields,
         },
         Rule: {

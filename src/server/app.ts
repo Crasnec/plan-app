@@ -16,6 +16,8 @@ import type { Config } from "./config.js";
 import { validDate, dateDiff, type Scope } from "../shared/domain.js";
 import { errorPage } from "./error-page.js";
 import { History } from "./history.js";
+import { preferences } from "./preferences.js";
+import { validPreferences } from "../shared/preferences.js";
 
 export function createApp(
   store: Store,
@@ -130,6 +132,25 @@ export function createApp(
     }
   });
   agentManagement(app, store, cfg);
+  app.use("/api/preferences", (req, _res, next) => {
+    if (req.headers.authorization)
+      throw new HttpError(
+        403,
+        "설정은 소유자 브라우저에서만 관리할 수 있습니다.",
+      );
+    next();
+  });
+  app.get("/api/preferences", (_req, res) => res.json(preferences(store)));
+  app.post("/api/preferences", (req, res) => {
+    if (!validPreferences(req.body))
+      throw new HttpError(
+        400,
+        "설정 값을 확인해 주세요. 기본 소요 시간은 5~1440분입니다.",
+      );
+    store.set("preferences", JSON.stringify(req.body));
+    broadcast();
+    res.json(preferences(store));
+  });
   app.use("/api/history", (req, _res, next) =>
     req.headers.authorization
       ? next(new HttpError(403, "되돌리기는 소유자 브라우저에서만 가능합니다."))
