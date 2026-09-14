@@ -78,7 +78,11 @@ try {
     fullPage: true,
   });
   const openSettings = async (name) => {
-    await page.locator(".header-settings").click();
+    assert.equal(
+      await page.getByRole("button", { name: "설정", exact: true }).count(),
+      1,
+    );
+    await page.getByRole("button", { name: "설정", exact: true }).click();
     await page
       .getByRole("dialog")
       .getByRole("button", { name, exact: true })
@@ -128,7 +132,11 @@ try {
   assert.equal(authorized.status(), 200);
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator(".header-settings").click();
+  assert.equal(
+    await page.getByRole("button", { name: "설정", exact: true }).count(),
+    1,
+  );
+  await page.getByRole("button", { name: "설정", exact: true }).click();
   assert(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

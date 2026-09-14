@@ -1315,8 +1315,15 @@ nav button.active {
     background: #e5ebda;
     color: #627b51;
   }
-  .mobile-nav button:nth-child(3) {
+  .mobile-menu-actions {
+    display: flex;
+    flex-direction: column;
     margin-left: auto;
+  }
+  .mobile-menu-actions button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
   .calendar-toolbar {
     padding: 18px 12px;
@@ -1821,7 +1828,4 @@ nav button.active {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-.header-settings {
-  flex-shrink: 0;
 }

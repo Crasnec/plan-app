@@ -487,14 +487,6 @@ function App() {
             {!readOnly && (
               <>
                 <button
-                  className="header-settings icon-button"
-                  aria-label="설정"
-                  title="설정"
-                  onClick={() => setPanel("settings")}
-                >
-                  <Icon name="settings" />
-                </button>
-                <button
                   className="primary"
                   onClick={() =>
                     setEditor({ event: null, date: undated ? null : selected })
@@ -543,11 +535,16 @@ function App() {
             날짜 미정 {undatedCount}
           </button>
           {!readOnly && (
-            <>
+            <div className="mobile-menu-actions">
+              <button onClick={() => setPanel("settings")} aria-label="설정">
+                <Icon name="settings" size={18} />
+                설정
+              </button>
               <button onClick={() => setPanel("trash")} aria-label="휴지통">
                 <Icon name="trash" size={18} />
+                휴지통
               </button>
-            </>
+            </div>
           )}
         </div>
         <div className="workspace">
