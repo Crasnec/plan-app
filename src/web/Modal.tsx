@@ -6,12 +6,14 @@ export function Modal({
   children,
   wide = false,
   busy = false,
+  onBack,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
   busy?: boolean;
+  onBack?: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -42,8 +44,23 @@ export function Modal({
       aria-labelledby="modal-title"
     >
       <div className="modal-head">
+        {onBack && (
+          <button
+            className="icon-button"
+            aria-label="설정으로 돌아가기"
+            onClick={onBack}
+            disabled={busy}
+          >
+            <Icon name="left" />
+          </button>
+        )}
         <h2 id="modal-title">{title}</h2>
-        <button className="icon-button" aria-label="닫기" onClick={onClose} disabled={busy}>
+        <button
+          className="icon-button"
+          aria-label="닫기"
+          onClick={onClose}
+          disabled={busy}
+        >
           <Icon name="close" />
         </button>
       </div>

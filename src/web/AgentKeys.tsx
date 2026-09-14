@@ -15,7 +15,13 @@ const date = (value: string) =>
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
-export function AgentKeys({ onClose }: { onClose: () => void }) {
+export function AgentKeys({
+  onClose,
+  onBack,
+}: {
+  onClose: () => void;
+  onBack?: () => void;
+}) {
   const [keys, setKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false);
@@ -35,14 +41,14 @@ export function AgentKeys({ onClose }: { onClose: () => void }) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
-  const close = () => {
+  const leave = (destination: () => void) => {
     if (issued && !saved) {
       setError(
         "키를 복사하거나 안전한 곳에 저장한 뒤 ‘안전하게 저장했습니다’를 선택해 주세요.",
       );
       return;
     }
-    onClose();
+    destination();
   };
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -90,7 +96,12 @@ export function AgentKeys({ onClose }: { onClose: () => void }) {
     }
   };
   return (
-    <Modal title="API 키 관리" onClose={close} busy={busy}>
+    <Modal
+      title="API 키 관리"
+      onClose={() => leave(onClose)}
+      onBack={onBack ? () => leave(onBack) : undefined}
+      busy={busy}
+    >
       <div className="settings-content agent-keys">
         <p>
           에이전트가 내 일정에 접근할 때 사용하는 키입니다. 읽기 권한에는{" "}
@@ -109,7 +120,7 @@ export function AgentKeys({ onClose }: { onClose: () => void }) {
         )}
         {notice && <p role="status">{notice}</p>}
         {issued ? (
-        <section className="issued-key" aria-label="키 발급 결과">
+          <section className="issued-key" aria-label="키 발급 결과">
             <h3>키가 발급되었습니다</h3>
             <p>
               원문은 지금 한 번만 표시됩니다. 창을 닫으면 다시 볼 수 없습니다.

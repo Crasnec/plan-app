@@ -19,6 +19,7 @@ export async function api<T>(path: string, body?: unknown): Promise<T> {
   return data as T;
 }
 export interface Me {
+  email?: string | null;
   owner: boolean;
   demo: boolean;
   loginReady: boolean;
