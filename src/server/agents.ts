@@ -26,6 +26,7 @@ interface KeyRow {
   owner_sub: string | null;
   created_at: number;
   expires_at: number;
+  mcp?: number;
   revoked_at: number | null;
   last_used_at: number | null;
 }
@@ -44,7 +45,8 @@ function metadata(k: KeyRow) {
     name: k.name,
     scopes: JSON.parse(k.scopes),
     createdAt: new Date(k.created_at).toISOString(),
-    expiresAt: new Date(k.expires_at).toISOString(),
+    expiresAt: k.mcp ? null : new Date(k.expires_at).toISOString(),
+    kind: k.mcp ? "mcp" : "api",
     revokedAt: k.revoked_at ? new Date(k.revoked_at).toISOString() : null,
     lastUsedAt: k.last_used_at ? new Date(k.last_used_at).toISOString() : null,
   };
@@ -63,7 +65,9 @@ export function agentManagement(app: Express, store: Store, cfg: Config) {
   });
   app.get("/api/agent-keys", (_req, res) => {
     const rows = store.db
-      .prepare("SELECT * FROM agent_keys ORDER BY created_at DESC")
+      .prepare(
+        "SELECT k.*, EXISTS(SELECT 1 FROM mcp_connections c WHERE c.key_id=k.id) AS mcp FROM agent_keys k ORDER BY created_at DESC",
+      )
       .all() as unknown as KeyRow[];
     res.json({ keys: rows.map(metadata) });
   });
@@ -138,6 +142,11 @@ export function agentManagement(app: Express, store: Store, cfg: Config) {
       )
       .run(Date.now(), String(req.params.id));
     if (!result.changes) throw new HttpError(404, "키를 찾을 수 없습니다.");
+    store.db
+      .prepare(
+        "DELETE FROM mcp_oauth WHERE kind IN ('code','access','refresh','used_refresh') AND json_extract(data,'$.keyId')=?",
+      )
+      .run(String(req.params.id));
     res.json({ ok: true });
   });
   app.get("/api/agent-keys/audit", (_req, res) => {

@@ -52,7 +52,29 @@ export class Store {
       CREATE INDEX IF NOT EXISTS mcp_oauth_expiry ON mcp_oauth(expires);
       INSERT OR IGNORE INTO migrations(version) VALUES(3);
       CREATE TABLE IF NOT EXISTS session_details(session_hash TEXT PRIMARY KEY REFERENCES sessions(hash) ON DELETE CASCADE, id TEXT UNIQUE NOT NULL, device TEXT NOT NULL, created_at INTEGER, last_seen INTEGER);
-      INSERT OR IGNORE INTO migrations(version) VALUES(4);`);
+      INSERT OR IGNORE INTO migrations(version) VALUES(4);
+      CREATE TABLE IF NOT EXISTS mcp_connections(key_id TEXT PRIMARY KEY REFERENCES agent_keys(id));`);
+    if (!this.db.prepare("SELECT 1 FROM migrations WHERE version=5").get())
+      this.transaction(() => {
+        const now = Date.now(),
+          forever = 8640000000000000;
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO mcp_connections SELECT DISTINCT k.id FROM agent_keys k JOIN mcp_oauth o ON json_extract(o.data,'$.keyId')=k.id WHERE k.expires_at>? AND k.revoked_at IS NULL`,
+          )
+          .run(now);
+        this.db
+          .prepare(
+            "UPDATE agent_keys SET expires_at=? WHERE id IN (SELECT key_id FROM mcp_connections)",
+          )
+          .run(forever);
+        this.db
+          .prepare(
+            "UPDATE mcp_oauth SET expires=? WHERE kind IN ('refresh','used_refresh') AND expires>? AND json_extract(data,'$.keyId') IN (SELECT key_id FROM mcp_connections)",
+          )
+          .run(forever, now);
+        this.db.exec("INSERT INTO migrations VALUES(5)");
+      });
   }
   transaction<T>(fn: () => T): T {
     if (this.transactionActive) return fn();

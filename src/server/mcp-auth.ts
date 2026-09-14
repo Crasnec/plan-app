@@ -27,6 +27,7 @@ import { Store, HttpError } from "./store.js";
 import type { Config } from "./config.js";
 
 export const mcpScopes = ["items:read", "items:write", "items:delete"];
+const FOREVER = 8640000000000000; // Storage sentinel, never exposed as a connection expiry.
 type Grant = {
   clientId: string;
   keyId: string;
@@ -193,7 +194,9 @@ export class McpAuth implements OAuthServerProvider {
     if (
       !key ||
       key.revoked_at !== null ||
-      Number(key.expires_at) <= Date.now() ||
+      !this.store.db
+        .prepare("SELECT 1 FROM mcp_connections WHERE key_id=?")
+        .get(grant.keyId) ||
       key.owner_email !== this.cfg.owner.toLowerCase() ||
       key.owner_sub !== this.store.setting("owner_sub") ||
       (!this.cfg.demo && !key.owner_sub) ||
@@ -208,12 +211,12 @@ export class McpAuth implements OAuthServerProvider {
     return key;
   }
   issue(grant: Grant): OAuthTokens {
-    const key = this.key(grant);
+    this.key(grant);
     const access = token(),
       refresh = token();
-    const expires = Math.min(Date.now() + 3600000, Number(key.expires_at));
+    const expires = Date.now() + 3600000;
     this.put(hash(access), "access", grant, expires);
-    this.put(hash(refresh), "refresh", grant, Number(key.expires_at));
+    this.put(hash(refresh), "refresh", grant, FOREVER);
     return {
       access_token: access,
       token_type: "Bearer",
@@ -254,10 +257,10 @@ export class McpAuth implements OAuthServerProvider {
       const grant = this.read<Grant>(hash(raw), "refresh");
       if (!grant || grant.clientId !== client.client_id)
         throw new InvalidGrantError("Invalid refresh token.");
-      const key = this.key(grant);
+      this.key(grant);
       if (scopes?.some((s) => !grant.scopes.includes(s)))
         throw new InvalidScopeError("Scope escalation is not permitted.");
-      this.put(hash(raw), "used_refresh", grant, Number(key.expires_at));
+      this.put(hash(raw), "used_refresh", grant, FOREVER);
       return this.issue({ ...grant, scopes: scopes ?? grant.scopes });
     });
   }
@@ -277,6 +280,11 @@ export class McpAuth implements OAuthServerProvider {
     this.store.db
       .prepare("UPDATE agent_keys SET revoked_at=? WHERE id=?")
       .run(Date.now(), grant.keyId);
+    this.store.db
+      .prepare(
+        "DELETE FROM mcp_oauth WHERE kind IN ('code','access','refresh','used_refresh') AND json_extract(data,'$.keyId')=?",
+      )
+      .run(grant.keyId);
   }
   async revokeToken(
     client: OAuthClientInformationFull,
@@ -354,7 +362,7 @@ export class McpAuth implements OAuthServerProvider {
         .type("html")
         .send(
           page(
-            `<h1>ChatGPT 연결 승인</h1><p>클라이언트: ${escape(client.client_name || "MCP 클라이언트")}</p><small>이름은 클라이언트가 제공한 정보입니다. 승인 후 ${escape(new URL(pending.redirectUri).origin)}으로 돌아갑니다. 연결은 30일간 유효하며 설정 → API 키 관리에서 폐기할 수 있습니다.</small><form method="post" action="/mcp/connect"><input type="hidden" name="ticket" value="${escape(ticket)}"><input type="hidden" name="csrf" value="${csrf}">${pending.scopes.map((s) => `<label><input type="checkbox" name="scope" value="${s}" ${s === "items:read" ? "checked disabled" : ""}> ${names[s]}</label>`).join("")}<p>등록·수정·삭제 권한은 필요한 경우에만 선택하세요.</p><button name="decision" value="approve">연결 승인</button><button name="decision" value="deny">취소</button></form>`,
+            `<h1>ChatGPT 연결 승인</h1><p>클라이언트: ${escape(client.client_name || "MCP 클라이언트")}</p><small>이름은 클라이언트가 제공한 정보입니다. 승인 후 ${escape(new URL(pending.redirectUri).origin)}으로 돌아갑니다. 연결은 별도 유효기한 없이 유지되며 설정 → MCP 연결에서 언제든 폐기할 수 있습니다.</small><form method="post" action="/mcp/connect"><input type="hidden" name="ticket" value="${escape(ticket)}"><input type="hidden" name="csrf" value="${csrf}">${pending.scopes.map((s) => `<label><input type="checkbox" name="scope" value="${s}" ${s === "items:read" ? "checked disabled" : ""}> ${names[s]}</label>`).join("")}<p>등록·수정·삭제 권한은 필요한 경우에만 선택하세요.</p><button name="decision" value="approve">연결 승인</button><button name="decision" value="deny">취소</button></form>`,
           ),
         );
     });
@@ -419,10 +427,13 @@ export class McpAuth implements OAuthServerProvider {
                 this.cfg.owner.toLowerCase(),
                 this.store.setting("owner_sub"),
                 Date.now(),
-                Date.now() + 30 * 86400000,
+                FOREVER,
                 null,
                 null,
               );
+            this.store.db
+              .prepare("INSERT INTO mcp_connections VALUES(?)")
+              .run(id);
             const raw = token();
             this.put(
               hash(raw),

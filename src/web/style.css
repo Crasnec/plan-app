@@ -1824,6 +1824,103 @@ nav button.active {
 .settings-account h3 {
   font-size: 14px;
 }
+.settings-dialog {
+  width: min(920px, calc(100vw - 32px));
+  padding: 0;
+  overflow: hidden;
+}
+.settings-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  height: min(760px, calc(100dvh - 32px));
+}
+.settings-dialog > .modal-head {
+  flex-shrink: 0;
+  padding: 20px 24px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+.settings-layout {
+  display: grid;
+  grid-template-columns: 165px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.settings-nav {
+  align-content: start;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  background: #f6f7ef;
+  overflow-y: auto;
+}
+.settings-nav button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 12px;
+  margin-bottom: 4px;
+}
+.settings-nav button[aria-current="page"] {
+  background: #e3eadb;
+  color: #405734;
+  font-weight: 700;
+}
+.settings-pane {
+  padding: 22px;
+  overflow-y: auto;
+  min-width: 0;
+}
+.settings-pane label {
+  display: block;
+  margin: 12px 0;
+}
+.settings-pane input:not([type="checkbox"]):not([type="radio"]),
+.settings-pane select {
+  width: 100%;
+}
+.settings-footer {
+  flex-shrink: 0;
+  padding: 12px 22px 18px;
+  border-top: 1px solid var(--line);
+}
+.settings-footer .field-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+}
+.settings-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 700px) {
+  .settings-dialog {
+    width: calc(100vw - 16px);
+    max-width: none;
+  }
+  .settings-dialog[open] {
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+  .settings-layout {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+  .settings-nav {
+    padding: 8px 4px;
+  }
+  .settings-nav button {
+    padding: 11px 5px;
+    font-size: 11px;
+  }
+  .settings-pane {
+    padding: 14px 10px;
+    font-size: 12px;
+  }
+  .settings-footer {
+    padding: 10px 14px;
+  }
+}
 .session-list {
   display: grid;
   gap: 12px;

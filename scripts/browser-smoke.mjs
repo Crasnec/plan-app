@@ -121,6 +121,19 @@ try {
     path: "artifacts/mobile-mcp-consent.png",
     fullPage: true,
   });
+  const consentTicket = new URL(consent.url()).searchParams.get("ticket");
+  const consentCsrf = await consent.locator('input[name="csrf"]').inputValue();
+  const approved = await page.request.post(`${origin}/mcp/connect`, {
+    form: {
+      ticket: consentTicket,
+      csrf: consentCsrf,
+      decision: "approve",
+      scope: "items:write",
+    },
+    headers: { Origin: origin },
+    maxRedirects: 0,
+  });
+  assert.equal(approved.status(), 303);
   await consent.close();
   await page.screenshot({
     path: "artifacts/desktop-month.png",
@@ -185,7 +198,10 @@ try {
   await page
     .getByRole("heading", { name: "이 기기를 로그아웃할까요?" })
     .waitFor();
-  await page.getByRole("button", { name: "취소", exact: true }).click();
+  await page
+    .locator(".session-confirm")
+    .getByRole("button", { name: "취소", exact: true })
+    .click();
   await page
     .locator(".session-card")
     .filter({ hasText: "Windows · Edge" })
@@ -200,9 +216,7 @@ try {
       .isDisabled(),
     true,
   );
-  await page
-    .getByRole("button", { name: "설정으로 돌아가기", exact: true })
-    .click();
+  await page.getByRole("button", { name: "기본 설정", exact: true }).click();
   await page.getByRole("heading", { name: "설정", exact: true }).waitFor();
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.unroute("**/api/sessions");
@@ -212,14 +226,32 @@ try {
     .locator(".sidebar-bottom")
     .getByRole("button", { name: "설정", exact: true })
     .click();
-  await page.getByRole("heading", { name: "계정", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "기본 설정", exact: true }).waitFor();
+  await page.getByLabel("기본 소요 시간 (분)").fill("90");
+  await page.getByRole("button", { name: "MCP 연결", exact: true }).click();
+  await page.getByText(/유효기한 없음 · 연결:/).waitFor();
+  await page.getByRole("button", { name: "연결 폐기", exact: true }).click();
+  await page.getByRole("button", { name: "폐기하기", exact: true }).click();
+  await page
+    .getByRole("heading", { name: "MCP · ChatGPT · 폐기됨", exact: true })
+    .waitFor();
+  await page.getByRole("button", { name: "기본 설정", exact: true }).click();
+  assert.equal(await page.getByLabel("기본 소요 시간 (분)").inputValue(), "90");
+  await page
+    .locator(".settings-footer-actions")
+    .getByRole("button", { name: "취소", exact: true })
+    .click();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  assert.equal(await page.getByLabel("기본 소요 시간 (분)").inputValue(), "60");
+  assert.equal(
+    await page.getByRole("button", { name: "적용", exact: true }).isDisabled(),
+    true,
+  );
   await page.getByLabel("기본 소요 시간 (분)").fill("45");
   await page.getByLabel("완료 일정", { exact: true }).selectOption("false");
   await page.getByLabel("새 일정의 공유 공개 기본값").selectOption("true");
   await page.getByLabel("API 새 일정에도 기본값 적용").selectOption("true");
-  await page
-    .getByRole("button", { name: "기본 설정 저장", exact: true })
-    .click();
+  await page.getByRole("button", { name: "적용", exact: true }).click();
   await page.getByText("기본 설정을 저장했습니다.", { exact: true }).waitFor();
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.reload();
@@ -267,17 +299,15 @@ try {
   await page.getByLabel("완료 일정", { exact: true }).selectOption("true");
   await page.getByLabel("새 일정의 공유 공개 기본값").selectOption("false");
   await page.getByLabel("API 새 일정에도 기본값 적용").selectOption("false");
-  await page
-    .getByRole("button", { name: "기본 설정 저장", exact: true })
-    .click();
+  await page.getByRole("button", { name: "확인", exact: true }).click();
   await page.getByText("기본 설정을 저장했습니다.", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 0);
+  await page.getByRole("button", { name: "설정", exact: true }).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "알림 설정", exact: true })
     .click();
-  await page
-    .getByRole("button", { name: "설정으로 돌아가기", exact: true })
-    .click();
+  await page.getByRole("button", { name: "기본 설정", exact: true }).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "API 키 관리", exact: true })
@@ -288,9 +318,7 @@ try {
     .getByLabel("발급된 API 키", { exact: true })
     .inputValue();
   assert.match(apiKey, /^plan_agent_/);
-  await page
-    .getByRole("button", { name: "설정으로 돌아가기", exact: true })
-    .click();
+  await page.getByRole("button", { name: "기본 설정", exact: true }).click();
   await page.getByRole("alert").waitFor();
   assert.equal(
     await page.getByLabel("발급된 API 키", { exact: true }).count(),
@@ -299,7 +327,7 @@ try {
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("alert").waitFor();
   await page.getByLabel("안전하게 저장했습니다").check();
-  await page.getByRole("button", { name: "확인", exact: true }).click();
+  await page.getByRole("button", { name: "키 보관 완료", exact: true }).click();
   assert.equal(
     await page.getByLabel("발급된 API 키", { exact: true }).count(),
     0,
