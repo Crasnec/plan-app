@@ -125,12 +125,12 @@ function App() {
     } | null>(null),
     [moveScope, setMoveScope] = useState<Scope>("one"),
     [savingMove, setSavingMove] = useState(false);
-  const readOnly = !!shared || !me?.owner;
+  const readOnly = !!shared || !me?.email;
   const loadSequence = useRef(0);
   useEffect(() => {
     api<Me>("/me")
       .then(async (value) => {
-        if (value.owner && !shared)
+        if (value.email && !shared)
           setPreferences(await api<Preferences>("/preferences"));
         setMe(value);
       })
@@ -140,7 +140,7 @@ function App() {
       });
   }, []);
   const load = useCallback(async () => {
-    if (!me || (!me.owner && !shared)) {
+    if (!me || (!me.email && !shared)) {
       setLoading(false);
       return;
     }
@@ -171,7 +171,7 @@ function App() {
         setEditor(null);
       }
       if ((e as { status: number }).status === 401 && !shared)
-        setMe((x) => (x ? { ...x, owner: false } : x));
+        setMe((x) => (x ? { ...x, id: null, email: null } : x));
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
@@ -184,7 +184,7 @@ function App() {
     };
   }, [load]);
   useEffect(() => {
-    if (!me?.owner && !shared) return;
+    if (!me?.email && !shared) return;
     let sse: EventSource | undefined;
     if (!shared) {
       sse = new EventSource("/api/events");
@@ -388,7 +388,7 @@ function App() {
         {error && <button onClick={() => location.reload()}>다시 시도</button>}
       </div>
     );
-  if (!me.owner && !shared)
+  if (!me.email && !shared)
     return (
       <main className="login-page">
         <div className="brand">
@@ -420,7 +420,7 @@ function App() {
           )}
           <span className="login-note">
             <Icon name="lock" size={14} />
-            소유자만 로그인할 수 있습니다.
+            새로 가입하려면 초대 링크가 필요해요.
           </span>
         </div>
         <footer>작은 계획이 모여, 나다운 하루.</footer>
@@ -475,9 +475,11 @@ function App() {
             </>
           )}
           <div className="profile">
-            <span className="avatar">{shared ? "V" : "C"}</span>
+            <span className="avatar">
+              {shared ? "V" : (me.email?.[0]?.toUpperCase() ?? "C")}
+            </span>
             <div>
-              {shared ? "함께 보는 계획" : "나의 공간"}
+              {shared ? "함께 보는 계획" : (me.email ?? "나의 공간")}
               <small>
                 {shared ? "읽기 전용" : me.demo ? "로컬 미리보기" : "개인 일정"}
               </small>

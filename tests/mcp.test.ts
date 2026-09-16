@@ -24,10 +24,10 @@ const cfg: Config = {
 const callback = "https://chatgpt.com/connector/oauth/test-client";
 async function fixture(path = ":memory:") {
   const store = new Store(path);
-  store.set("owner_sub", "google-owner");
+  const user = store.createUser(cfg.owner, "google-owner");
   store.db
-    .prepare("INSERT INTO sessions VALUES(?,?)")
-    .run(hash("session"), Date.now() + 600000);
+    .prepare("INSERT INTO sessions VALUES(?,?,?)")
+    .run(hash("session"), Date.now() + 600000, user.id);
   const { app, close } = createApp(store, cfg);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((r) => server.once("listening", r));
@@ -148,6 +148,7 @@ async function fixture(path = ":memory:") {
   return {
     base,
     store,
+    user,
     request,
     form,
     start,
@@ -260,8 +261,8 @@ test("MCP tools use KST, defaults, strict schemas, idempotency, version checks a
         .destructiveHint,
       true,
     );
-    f.store.set(
-      "preferences",
+    f.store.setUserPreferences(
+      f.user.id,
       JSON.stringify({
         durationMinutes: 45,
         showCompleted: false,
@@ -344,7 +345,7 @@ test("MCP tools use KST, defaults, strict schemas, idempotency, version checks a
       ).isError,
       undefined,
     );
-    assert.equal(f.store.item(item.id).deletedAt, null);
+    assert.equal(f.store.item(item.id, f.user.id).deletedAt, null);
     const audit = JSON.stringify(
       f.store.db.prepare("SELECT * FROM agent_audit").all(),
     );
@@ -485,7 +486,7 @@ test("Migration extends only active MCP grants and preserves ordinary API key ex
       )
       .run(legacyExpiry);
     f.store.db
-      .prepare("INSERT INTO agent_keys VALUES(?,?,?,?,?,?,?,?,?,?)")
+      .prepare("INSERT INTO agent_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)")
       .run(
         "api-only",
         "ordinary",
@@ -497,6 +498,7 @@ test("Migration extends only active MCP grants and preserves ordinary API key ex
         legacyExpiry,
         null,
         null,
+        f.user.id,
       );
     f.store.db.exec(
       "DELETE FROM mcp_connections; DELETE FROM migrations WHERE version=5",

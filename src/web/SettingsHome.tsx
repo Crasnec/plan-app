@@ -4,6 +4,7 @@ import { SettingsContext } from "./SettingsContext.js";
 import { AgentKeys } from "./AgentKeys.js";
 import { Sessions } from "./Sessions.js";
 import { McpConnections } from "./McpConnections.js";
+import { Invites } from "./Invites.js";
 import type { Me } from "./api.js";
 import { validPreferences, type Preferences } from "../shared/preferences.js";
 const menus = [
@@ -13,6 +14,7 @@ const menus = [
   ["sessions", "세션 관리"],
   ["mcp", "MCP 연결"],
   ["keys", "API 키 관리"],
+  ["invites", "초대"],
   ["account", "계정"],
 ] as const;
 type Tab = (typeof menus)[number][0];
@@ -174,13 +176,14 @@ export function SettingsHome({
               <Sessions onClose={leave} onBack={() => setTab("general")} />
             )}
             {tab === "mcp" && <McpConnections />}
+            {tab === "invites" && <Invites />}
             {tab === "account" && (
               <section>
                 <h3>계정</h3>
                 <p>
                   {me.demo
                     ? "로컬 데모 · Google 로그인 없음"
-                    : me.email || "소유자 계정으로 로그인됨"}
+                    : (me.email ?? "로그인됨")}
                 </p>
                 {!me.demo && (
                   <button

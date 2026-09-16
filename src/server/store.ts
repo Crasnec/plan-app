@@ -25,6 +25,33 @@ export class HttpError extends Error {
     super(message);
   }
 }
+export interface User {
+  id: string;
+  email: string;
+  googleSub: string;
+  createdAt: number;
+  shareHash: string | null;
+  preferences: string | null;
+  historyVersion: number;
+}
+interface UserRow {
+  id: string;
+  email: string;
+  google_sub: string;
+  created_at: number;
+  share_hash: string | null;
+  preferences: string | null;
+  history_version: number;
+}
+const toUser = (row: UserRow): User => ({
+  id: row.id,
+  email: row.email,
+  googleSub: row.google_sub,
+  createdAt: row.created_at,
+  shareHash: row.share_hash,
+  preferences: row.preferences,
+  historyVersion: row.history_version,
+});
 export class Store {
   db: DatabaseSync;
   private transactionActive = false;
@@ -53,7 +80,9 @@ export class Store {
       INSERT OR IGNORE INTO migrations(version) VALUES(3);
       CREATE TABLE IF NOT EXISTS session_details(session_hash TEXT PRIMARY KEY REFERENCES sessions(hash) ON DELETE CASCADE, id TEXT UNIQUE NOT NULL, device TEXT NOT NULL, created_at INTEGER, last_seen INTEGER);
       INSERT OR IGNORE INTO migrations(version) VALUES(4);
-      CREATE TABLE IF NOT EXISTS mcp_connections(key_id TEXT PRIMARY KEY REFERENCES agent_keys(id));`);
+      CREATE TABLE IF NOT EXISTS mcp_connections(key_id TEXT PRIMARY KEY REFERENCES agent_keys(id));
+      CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT NOT NULL, google_sub TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, share_hash TEXT, preferences TEXT, history_version INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS invites(id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, created_by TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_by TEXT REFERENCES users(id), used_at INTEGER, revoked_at INTEGER);`);
     if (!this.db.prepare("SELECT 1 FROM migrations WHERE version=5").get())
       this.transaction(() => {
         const now = Date.now(),
@@ -74,6 +103,26 @@ export class Store {
           )
           .run(forever, now);
         this.db.exec("INSERT INTO migrations VALUES(5)");
+      });
+    // Multi-tenant: every calendar/session/key row now belongs to a user. Columns
+    // are added nullable (SQLite can't add a NOT NULL column to an existing table
+    // without a default); ownership is enforced in application code instead, and
+    // index.ts backfills a first user from the pre-migration single-owner data.
+    if (!this.db.prepare("SELECT 1 FROM migrations WHERE version=6").get())
+      this.transaction(() => {
+        this.db.exec(`ALTER TABLE items ADD COLUMN user_id TEXT;
+          ALTER TABLE overrides ADD COLUMN user_id TEXT;
+          ALTER TABLE trash ADD COLUMN user_id TEXT;
+          ALTER TABLE sessions ADD COLUMN user_id TEXT;
+          ALTER TABLE agent_keys ADD COLUMN user_id TEXT;
+          ALTER TABLE subscriptions ADD COLUMN user_id TEXT;
+          CREATE INDEX IF NOT EXISTS items_user ON items(user_id);
+          CREATE INDEX IF NOT EXISTS overrides_user ON overrides(user_id);
+          CREATE INDEX IF NOT EXISTS trash_user ON trash(user_id);
+          CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+          CREATE INDEX IF NOT EXISTS agent_keys_user ON agent_keys(user_id);
+          CREATE INDEX IF NOT EXISTS subscriptions_user ON subscriptions(user_id);`);
+        this.db.exec("INSERT INTO migrations VALUES(6)");
       });
   }
   transaction<T>(fn: () => T): T {
@@ -106,41 +155,105 @@ export class Store {
       )
       .run(key, value);
   }
-  items(): Item[] {
+  user(id: string): User | undefined {
+    const row = this.db.prepare("SELECT * FROM users WHERE id=?").get(id) as
+      | UserRow
+      | undefined;
+    return row && toUser(row);
+  }
+  userBySub(googleSub: string): User | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM users WHERE google_sub=?")
+      .get(googleSub) as UserRow | undefined;
+    return row && toUser(row);
+  }
+  userByShareHash(shareHash: string): User | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM users WHERE share_hash=?")
+      .get(shareHash) as UserRow | undefined;
+    return row && toUser(row);
+  }
+  createUser(email: string, googleSub: string): User {
+    const row: UserRow = {
+      id: randomUUID(),
+      email,
+      google_sub: googleSub,
+      created_at: Date.now(),
+      share_hash: null,
+      preferences: null,
+      history_version: 0,
+    };
+    this.db
+      .prepare("INSERT INTO users VALUES(?,?,?,?,?,?,?)")
+      .run(
+        row.id,
+        row.email,
+        row.google_sub,
+        row.created_at,
+        row.share_hash,
+        row.preferences,
+        row.history_version,
+      );
+    return toUser(row);
+  }
+  setUserShareHash(id: string, shareHash: string | null) {
+    this.db
+      .prepare("UPDATE users SET share_hash=? WHERE id=?")
+      .run(shareHash, id);
+  }
+  setUserPreferences(id: string, preferences: string) {
+    this.db
+      .prepare("UPDATE users SET preferences=? WHERE id=?")
+      .run(preferences, id);
+  }
+  setUserHistoryVersion(id: string, version: number) {
+    this.db
+      .prepare("UPDATE users SET history_version=? WHERE id=?")
+      .run(version, id);
+  }
+  items(userId: string): Item[] {
     return this.db
-      .prepare("SELECT data FROM items")
-      .all()
+      .prepare("SELECT data FROM items WHERE user_id=?")
+      .all(userId)
       .map((r) => JSON.parse(r.data as string));
   }
-  overrides(): Override[] {
+  overrides(userId: string): Override[] {
     return this.db
-      .prepare("SELECT data FROM overrides")
-      .all()
+      .prepare("SELECT data FROM overrides WHERE user_id=?")
+      .all(userId)
       .map((r) => JSON.parse(r.data as string));
   }
-  item(id: string): Item {
-    const row = this.db.prepare("SELECT data FROM items WHERE id=?").get(id);
+  item(id: string, userId: string): Item {
+    const row = this.db
+      .prepare("SELECT data FROM items WHERE id=? AND user_id=?")
+      .get(id, userId);
     if (!row) throw new HttpError(404, "일정을 찾을 수 없습니다.");
     return JSON.parse(row.data as string);
   }
-  save(item: Item) {
+  save(item: Item, userId: string) {
     this.db
       .prepare(
-        "INSERT INTO items VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+        "INSERT INTO items VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
       )
-      .run(item.id, JSON.stringify(item));
+      .run(item.id, JSON.stringify(item), userId);
   }
-  saveOverride(o: Override) {
+  saveOverride(o: Override, userId: string) {
     this.db
       .prepare(
-        "INSERT INTO overrides VALUES(?,?,?) ON CONFLICT(item_id,key) DO UPDATE SET data=excluded.data",
+        "INSERT INTO overrides VALUES(?,?,?,?) ON CONFLICT(item_id,key) DO UPDATE SET data=excluded.data",
       )
-      .run(o.itemId, o.key, JSON.stringify(o));
+      .run(o.itemId, o.key, JSON.stringify(o), userId);
   }
-  list(from: string, to: string, publicOnly = false) {
-    return expand(this.items(), this.overrides(), from, to, publicOnly);
+  list(userId: string, from: string, to: string, publicOnly = false) {
+    return expand(
+      this.items(userId),
+      this.overrides(userId),
+      from,
+      to,
+      publicOnly,
+    );
   }
-  create(input: unknown) {
+  create(userId: string, input: unknown) {
     const fields = validate(input);
     if (fields.rule && fields.done)
       throw new HttpError(
@@ -154,10 +267,11 @@ export class Store {
       deletedAt: null,
       cutoff: null,
     };
-    this.save(item);
+    this.save(item, userId);
     return item;
   }
   mutate(
+    userId: string,
     id: string,
     key: string,
     version: number,
@@ -166,7 +280,7 @@ export class Store {
     deleting = false,
   ) {
     return this.transaction(() => {
-      const item = this.item(id);
+      const item = this.item(id, userId);
       if (item.deletedAt) throw new HttpError(404, "삭제된 일정입니다.");
       if (item.version !== version)
         throw new HttpError(
@@ -175,7 +289,7 @@ export class Store {
         );
       if (!["one", "future", "all"].includes(scope) || !validKey(item, key))
         throw new HttpError(400, "변경 범위 또는 회차가 올바르지 않습니다.");
-      const exceptions = this.overrides().filter((o) => o.itemId === id);
+      const exceptions = this.overrides(userId).filter((o) => o.itemId === id);
       const existing = exceptions.find((o) => o.key === key);
       if (existing?.deletedAt) throw new HttpError(404, "삭제된 회차입니다.");
       const current = { ...atDate(item, key), ...existing?.patch };
@@ -242,8 +356,8 @@ export class Store {
             validate(next);
           }
         }
-        this.save(next);
-        if (!deleting) this.preserveExceptions(item, next, exceptions);
+        this.save(next, userId);
+        if (!deleting) this.preserveExceptions(userId, item, next, exceptions);
       } else if (scope === "one") {
         const patch: Partial<Fields> = { ...existing?.patch };
         if (fields) {
@@ -263,16 +377,19 @@ export class Store {
           if (fields.kind === "undated")
             throw new HttpError(400, "반복 회차에는 날짜가 필요합니다.");
         }
-        this.saveOverride({
-          itemId: id,
-          key,
-          patch,
-          deletedAt: deleting ? new Date().toISOString() : null,
-        });
-        this.save(next);
+        this.saveOverride(
+          {
+            itemId: id,
+            key,
+            patch,
+            deletedAt: deleting ? new Date().toISOString() : null,
+          },
+          userId,
+        );
+        this.save(next, userId);
       } else {
         next.cutoff = key;
-        this.save(next);
+        this.save(next, userId);
         if (fields) {
           const successor: Item = {
             ...fields,
@@ -282,15 +399,16 @@ export class Store {
             deletedAt: null,
             cutoff: item.cutoff,
           };
-          this.save(successor);
+          this.save(successor, userId);
           // Keep exceptions anchored to their original Korean calendar date. Non-matching dates stay dormant.
           for (const o of exceptions.filter((o) => o.key >= key)) {
-            this.saveOverride({ ...o, itemId: successor.id });
+            this.saveOverride({ ...o, itemId: successor.id }, userId);
             this.db
               .prepare("DELETE FROM overrides WHERE item_id=? AND key=?")
               .run(id, o.key);
           }
           this.preserveExceptions(
+            userId,
             item,
             successor,
             exceptions
@@ -300,7 +418,7 @@ export class Store {
         }
       }
       if (deleting)
-        this.db.prepare("INSERT INTO trash VALUES(?,?,?,?)").run(
+        this.db.prepare("INSERT INTO trash VALUES(?,?,?,?,?)").run(
           randomUUID(),
           item.title,
           Date.now(),
@@ -309,45 +427,58 @@ export class Store {
             after: next,
             scope: item.rule ? scope : "all",
             key,
-            deletedOverride: this.overrides().find(
+            deletedOverride: this.overrides(userId).find(
               (o) => o.itemId === id && o.key === key,
             ),
           }),
+          userId,
         );
       return next;
     });
   }
-  preserveExceptions(old: Item, next: Item, exceptions: Override[]) {
+  preserveExceptions(
+    userId: string,
+    old: Item,
+    next: Item,
+    exceptions: Override[],
+  ) {
     for (const o of exceptions) {
       const concrete = { ...atDate(old, o.key), ...o.patch };
       if (!validKey(next, o.key)) {
-        if (!o.deletedAt) this.create({ ...concrete, rule: null });
+        if (!o.deletedAt) this.create(userId, { ...concrete, rule: null });
         this.db
           .prepare("DELETE FROM overrides WHERE item_id=? AND key=?")
           .run(next.id, o.key);
       } else if (concrete.done || o.patch.start !== undefined) {
         // Completed or explicitly moved occurrences retain their original actual dates.
-        this.saveOverride({
-          ...o,
-          patch: {
-            ...o.patch,
-            kind: concrete.kind,
-            start: concrete.start,
-            end: concrete.end,
+        this.saveOverride(
+          {
+            ...o,
+            patch: {
+              ...o.patch,
+              kind: concrete.kind,
+              start: concrete.start,
+              end: concrete.end,
+            },
           },
-        });
+          userId,
+        );
       }
     }
   }
-  trash() {
+  trash(userId: string) {
     this.cleanup();
     return this.db
-      .prepare("SELECT id,title,deleted_at FROM trash ORDER BY deleted_at DESC")
-      .all();
+      .prepare(
+        "SELECT id,title,deleted_at FROM trash WHERE user_id=? ORDER BY deleted_at DESC",
+      )
+      .all(userId);
   }
-  restore(id: string) {
+  restore(userId: string, id: string) {
     return this.transaction(() => {
-      const row = this.db.prepare("SELECT * FROM trash WHERE id=?").get(id);
+      const row = this.db
+        .prepare("SELECT * FROM trash WHERE id=? AND user_id=?")
+        .get(id, userId);
       if (!row || Number(row.deleted_at) < Date.now() - 30 * DAY)
         throw new HttpError(404, "복구 기간이 지난 항목입니다.");
       const { before, after, scope, key, deletedOverride } = JSON.parse(
@@ -359,9 +490,9 @@ export class Store {
         key: string;
         deletedOverride: Override;
       };
-      const current = this.item(before.item.id);
+      const current = this.item(before.item.id, userId);
       if (scope === "one") {
-        const currentOverride = this.overrides().find(
+        const currentOverride = this.overrides(userId).find(
           (o) => o.itemId === current.id && o.key === key,
         );
         if (
@@ -374,12 +505,12 @@ export class Store {
             "먼저 이 회차가 속한 반복 일정을 복구해 주세요.",
           );
         const old = before.exceptions.find((o) => o.key === key);
-        if (old) this.saveOverride(old);
+        if (old) this.saveOverride(old, userId);
         else
           this.db
             .prepare("DELETE FROM overrides WHERE item_id=? AND key=?")
             .run(current.id, key);
-        this.save({ ...current, version: current.version + 1 });
+        this.save({ ...current, version: current.version + 1 }, userId);
         this.db.prepare("DELETE FROM trash WHERE id=?").run(id);
         return;
       }
@@ -389,22 +520,27 @@ export class Store {
             409,
             "최근에 삭제한 이후 일정을 먼저 복구해 주세요.",
           );
-        this.save({
-          ...current,
-          cutoff: before.item.cutoff,
-          version: current.version + 1,
-        });
+        this.save(
+          {
+            ...current,
+            cutoff: before.item.cutoff,
+            version: current.version + 1,
+          },
+          userId,
+        );
         this.db.prepare("DELETE FROM trash WHERE id=?").run(id);
         return;
       }
       if (current.deletedAt !== after.deletedAt || !current.deletedAt)
         throw new HttpError(409, "이미 복구되었거나 변경된 일정입니다.");
-      this.save({ ...before.item, version: current.version + 1 });
+      this.save({ ...before.item, version: current.version + 1 }, userId);
       this.db.prepare("DELETE FROM overrides WHERE item_id=?").run(current.id);
-      for (const o of before.exceptions) this.saveOverride(o);
+      for (const o of before.exceptions) this.saveOverride(o, userId);
       this.db.prepare("DELETE FROM trash WHERE id=?").run(id);
       // Older trash snapshots refer to the restored content with its prior version.
-      for (const old of this.db.prepare("SELECT id,data FROM trash").all()) {
+      for (const old of this.db
+        .prepare("SELECT id,data FROM trash WHERE user_id=?")
+        .all(userId)) {
         const data = JSON.parse(old.data as string);
         if (
           data.after.id === current.id &&
@@ -431,12 +567,22 @@ export class Store {
       "DELETE FROM agent_audit WHERE id IN (SELECT id FROM agent_audit ORDER BY created_at DESC LIMIT -1 OFFSET 10000)",
     );
     this.db.prepare("DELETE FROM trash WHERE deleted_at<?").run(now - 30 * DAY);
-    for (const item of this.items())
+    for (const row of this.db.prepare("SELECT id,data FROM items").all() as {
+      id: string;
+      data: string;
+    }[]) {
+      const item = JSON.parse(row.data) as Item;
       if (item.deletedAt && Date.parse(item.deletedAt) < now - 30 * DAY)
         this.db.prepare("DELETE FROM items WHERE id=?").run(item.id);
+    }
     this.db.prepare("DELETE FROM sessions WHERE expires<?").run(now);
     this.db.prepare("DELETE FROM oauth WHERE expires<?").run(now);
     this.db.prepare("DELETE FROM mcp_oauth WHERE expires<=?").run(now);
     this.db.prepare("DELETE FROM deliveries WHERE due<?").run(now - 30 * DAY);
+    this.db
+      .prepare(
+        "DELETE FROM invites WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at<?",
+      )
+      .run(now - 30 * DAY);
   }
 }

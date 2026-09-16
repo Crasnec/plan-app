@@ -42,9 +42,10 @@ test("Account email is returned only to the owner session", async () => {
 async function fixture() {
   const store = new Store(":memory:");
   const { app, close } = createApp(store, cfg);
+  const user = store.createUser(cfg.owner, "test-google-sub");
   store.db
-    .prepare("INSERT INTO sessions VALUES(?,?)")
-    .run(hash("test-owner-session"), Date.now() + 60000);
+    .prepare("INSERT INTO sessions VALUES(?,?,?)")
+    .run(hash("test-owner-session"), Date.now() + 60000, user.id);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((r) => server.once("listening", r));
   const port = (server.address() as { port: number }).port;
@@ -67,6 +68,7 @@ async function fixture() {
     });
   return {
     store,
+    user,
     request,
     cleanup: async () => {
       close();
@@ -79,7 +81,7 @@ test("Preferences are owner-only, validated, persisted and do not change existin
   const f = await fixture();
   try {
     assert.equal((await f.request("/api/preferences")).status, 401);
-    const original = f.store.create({
+    const original = f.store.create(f.user.id, {
       ...defaultFields("2026-09-14"),
       title: "private",
     });
@@ -111,8 +113,8 @@ test("Preferences are owner-only, validated, persisted and do not change existin
       await (await f.request("/api/preferences", undefined, true)).json(),
       p,
     );
-    assert.deepEqual(JSON.parse(f.store.setting("preferences")!), p);
-    assert.deepEqual(f.store.item(original.id), original);
+    assert.deepEqual(JSON.parse(f.store.user(f.user.id)!.preferences!), p);
+    assert.deepEqual(f.store.item(original.id, f.user.id), original);
   } finally {
     await f.cleanup();
   }
@@ -157,12 +159,12 @@ test("unauthenticated writes and reads are denied; foreign-origin writes denied"
 test("shared projection hides private entries, rule details, reminders; link rotation revokes access", async () => {
   const f = await fixture();
   try {
-    f.store.create({
+    f.store.create(f.user.id, {
       ...defaultFields("2026-09-10"),
       title: "비밀",
       notes: "private-notes",
     });
-    f.store.create({
+    f.store.create(f.user.id, {
       ...defaultFields("2026-09-10"),
       title: "공개",
       public: true,
@@ -196,8 +198,8 @@ test("expired sessions cannot edit; logout invalidates the stored session", asyn
   try {
     f.store.db.prepare("UPDATE sessions SET expires=?").run(Date.now() - 1);
     assert.equal(
-      (await (await f.request("/api/me", undefined, true)).json()).owner,
-      false,
+      (await (await f.request("/api/me", undefined, true)).json()).email,
+      null,
     );
     assert.equal(
       (
@@ -213,8 +215,8 @@ test("expired sessions cannot edit; logout invalidates the stored session", asyn
     await f.request("/api/logout", {}, true);
     assert.equal((await f.request("/api/me", undefined, true)).status, 200);
     assert.equal(
-      (await (await f.request("/api/me", undefined, true)).json()).owner,
-      false,
+      (await (await f.request("/api/me", undefined, true)).json()).email,
+      null,
     );
     assert.equal(
       (await f.request("/api/items", { ...defaultFields(), title: "x" }, true))
@@ -250,7 +252,7 @@ test("long query ranges and invalid mutation keys fail without changing data", a
       ).status,
       400,
     );
-    const i = f.store.create({ ...defaultFields(), title: "원본" });
+    const i = f.store.create(f.user.id, { ...defaultFields(), title: "원본" });
     assert.equal(
       (
         await f.request(
@@ -267,7 +269,7 @@ test("long query ranges and invalid mutation keys fail without changing data", a
       ).status,
       400,
     );
-    assert.equal(f.store.item(i.id).title, "원본");
+    assert.equal(f.store.item(i.id, f.user.id).title, "원본");
   } finally {
     await f.cleanup();
   }
@@ -278,14 +280,15 @@ test("SQLite persistence and native online backup restore the actual records", a
     const path = join(directory, "plan.sqlite"),
       target = join(directory, "backup.sqlite");
     let s = new Store(path);
-    const i = s.create({ ...defaultFields(), title: "영구 보관" });
+    const uid = "persist-user";
+    const i = s.create(uid, { ...defaultFields(), title: "영구 보관" });
     s.db.close();
     s = new Store(path);
-    assert.equal(s.item(i.id).title, "영구 보관");
+    assert.equal(s.item(i.id, uid).title, "영구 보관");
     await backup(s.db, target);
     s.db.close();
     const restored = new Store(target);
-    assert.equal(restored.item(i.id).title, "영구 보관");
+    assert.equal(restored.item(i.id, uid).title, "영구 보관");
     assert.equal(
       restored.db.prepare("PRAGMA integrity_check").get()!.integrity_check,
       "ok",
@@ -297,13 +300,14 @@ test("SQLite persistence and native online backup restore the actual records", a
 });
 test("expired trash is purged; recurring tombstones still suppress old deleted occurrences", () => {
   const s = new Store(":memory:");
+  const uid = "trash-user";
   try {
-    const i = s.create({ ...defaultFields("2026-09-01"), title: "old" });
-    s.mutate(i.id, "single", 1, "all", null, true);
+    const i = s.create(uid, { ...defaultFields("2026-09-01"), title: "old" });
+    s.mutate(uid, i.id, "single", 1, "all", null, true);
     s.db.prepare("UPDATE trash SET deleted_at=?").run(Date.now() - 31 * DAY);
     s.cleanup();
-    assert.equal(s.trash().length, 0);
-    const repeating = s.create({
+    assert.equal(s.trash(uid).length, 0);
+    const repeating = s.create(uid, {
       ...defaultFields("2026-09-01"),
       title: "반복",
       rule: {
@@ -317,11 +321,11 @@ test("expired trash is purged; recurring tombstones still suppress old deleted o
         until: null,
       },
     });
-    s.mutate(repeating.id, "2026-09-01", 1, "one", null, true);
+    s.mutate(uid, repeating.id, "2026-09-01", 1, "one", null, true);
     s.db.prepare("UPDATE trash SET deleted_at=?").run(Date.now() - 31 * DAY);
     s.cleanup();
-    assert.equal(s.trash().length, 0);
-    assert.equal(s.list("2026-09-01", "2026-09-02").length, 0);
+    assert.equal(s.trash(uid).length, 0);
+    assert.equal(s.list(uid, "2026-09-01", "2026-09-02").length, 0);
   } finally {
     s.db.close();
   }
@@ -348,9 +352,10 @@ test("notification worker sends once per due occurrence/device; completion cance
       return { statusCode: 201, body: "", headers: {} };
     }) as never,
   );
+  const uid = "push-user";
   try {
     const now = Date.now();
-    const i = s.create({
+    const i = s.create(uid, {
       ...defaultFields(today()),
       title: "알림",
       kind: "timed",
@@ -358,18 +363,19 @@ test("notification worker sends once per due occurrence/device; completion cance
       end: new Date(now + 60000).toISOString(),
       reminder: 0,
     });
-    s.db.prepare("INSERT INTO subscriptions VALUES(?,?,?)").run(
+    s.db.prepare("INSERT INTO subscriptions VALUES(?,?,?,?)").run(
       "device",
       JSON.stringify({
         endpoint: "https://fcm.googleapis.com/test",
         keys: {},
       }),
       now - 60000,
+      uid,
     );
     await worker.tick();
     await worker.tick();
     assert.equal(calls, 1);
-    s.mutate(i.id, "single", 1, "one", { ...i, done: true });
+    s.mutate(uid, i.id, "single", 1, "one", { ...i, done: true });
     await worker.tick();
     assert.equal(calls, 1);
     assert.equal(

@@ -79,8 +79,7 @@ test("Browser errors are HTML; API and JSON clients keep JSON; denied OAuth acco
     );
     assert.equal(denied.status, 403);
     const body = await denied.text();
-    assert.match(body, /편집 권한이 없는 계정/);
-    assert.match(body, /다른 계정으로 로그인/);
+    assert.match(body, /가입하려면 초대가 필요해요/);
     assert.doesNotMatch(body, /visitor@example|test-nonce|test-verifier/);
     assert.equal(
       store.db.prepare("SELECT count(*) AS n FROM sessions").get()!.n,

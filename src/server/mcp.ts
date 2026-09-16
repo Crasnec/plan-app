@@ -116,7 +116,7 @@ export function mountMcp(
   app: Express,
   store: Store,
   cfg: Config,
-  broadcast: () => void,
+  broadcast: (userId: string) => void,
 ) {
   const auth = new McpAuth(store, cfg);
   auth.mount(app);
@@ -174,6 +174,7 @@ export function mountMcp(
       return;
     }
     const keyId = principal.extra.keyId;
+    const userId = principal.extra.userId;
     store.db
       .prepare("UPDATE agent_keys SET last_used_at=? WHERE id=?")
       .run(Date.now(), keyId);
@@ -277,7 +278,7 @@ export function mountMcp(
                 );
               return data;
             });
-            if (!replay) broadcast();
+            if (!replay) broadcast(userId);
           } else result = run(parsed.data);
           return {
             content: [{ type: "text", text: JSON.stringify(result) }],
@@ -307,7 +308,7 @@ export function mountMcp(
       z.object({}).strict(),
       "items:read",
       () => {
-        const p = preferences(store),
+        const p = preferences(store.user(userId)!),
           effective = p.applyToApi ? p : defaultPreferences;
         return {
           nowKst: `${local(new Date().toISOString())}+09:00`,
@@ -337,7 +338,7 @@ export function mountMcp(
       ({ from, to, limit, offset }) => {
         if (dateDiff(to, from) < 1 || dateDiff(to, from) > 100)
           throw new HttpError(400, "조회 범위는 1~100일입니다.");
-        const all = store.list(from, to);
+        const all = store.list(userId, from, to);
         return {
           items: all.slice(offset, offset + limit).map((item) => ({
             ...item,
@@ -369,7 +370,7 @@ export function mountMcp(
         .strict(),
       "items:write",
       (args) => {
-        const p = preferences(store),
+        const p = preferences(store.user(userId)!),
           effective = p.applyToApi ? p : defaultPreferences;
         const value = normalizeTimes(args);
         if (value.kind !== "undated" && !value.start)
@@ -385,7 +386,7 @@ export function mountMcp(
                     Date.parse(value.start!) +
                       effective.durationMinutes * 60000,
                   ).toISOString();
-        const item = store.create({
+        const item = store.create(userId, {
           ...defaultFields(null),
           ...value,
           start: value.start ?? null,
@@ -399,11 +400,11 @@ export function mountMcp(
       args: z.infer<z.ZodObject<typeof identity>>,
       changes: Partial<Fields>,
     ) => {
-      const item = store.item(args.itemId);
+      const item = store.item(args.itemId, userId);
       if (item.deletedAt || !validKey(item, args.key))
         throw new HttpError(404, "회차를 찾을 수 없습니다.");
       const override = store
-        .overrides()
+        .overrides(userId)
         .find((o) => o.itemId === item.id && o.key === args.key);
       if (override?.deletedAt) throw new HttpError(404, "삭제된 회차입니다.");
       if (item.rule && args.scope === "one" && "rule" in changes)
@@ -419,7 +420,14 @@ export function mountMcp(
         }),
       );
       return {
-        item: store.mutate(item.id, args.key, args.version, args.scope, next),
+        item: store.mutate(
+          userId,
+          item.id,
+          args.key,
+          args.version,
+          args.scope,
+          next,
+        ),
         refreshRequired: true,
       };
     };
@@ -457,6 +465,7 @@ export function mountMcp(
       "items:delete",
       (args) => {
         store.mutate(
+          userId,
           args.itemId,
           args.key,
           args.version,
@@ -473,7 +482,7 @@ export function mountMcp(
       "삭제된 일정 목록과 복구용 trashId를 조회합니다. 삭제 후 30일이 지나면 복구할 수 없습니다.",
       z.object({}).strict(),
       "items:read",
-      () => ({ items: store.trash() }),
+      () => ({ items: store.trash(userId) }),
     );
     register(
       "plan_restore",
@@ -481,7 +490,7 @@ export function mountMcp(
       z.object({ trashId: id, operationId: operation }).strict(),
       "items:write",
       ({ trashId }) => {
-        store.restore(trashId);
+        store.restore(userId, trashId);
         return { ok: true, refreshRequired: true };
       },
     );
