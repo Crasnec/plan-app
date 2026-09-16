@@ -6,9 +6,8 @@ type Invite = {
   id: string;
   createdAt: string;
   expiresAt: string;
-  usedAt: string | null;
-  usedByEmail: string | null;
   revokedAt: string | null;
+  usesCount: number;
 };
 const time = (value: string) =>
   new Intl.DateTimeFormat("ko-KR", {
@@ -34,16 +33,15 @@ export function Invites() {
   const status = (invite: Invite) =>
     invite.revokedAt
       ? "취소됨"
-      : invite.usedAt
-        ? "사용됨"
-        : Date.parse(invite.expiresAt) <= Date.now()
-          ? "만료됨"
-          : "대기 중";
+      : Date.parse(invite.expiresAt) <= Date.now()
+        ? "만료됨"
+        : "사용 가능";
   return (
     <Modal title="초대" onClose={() => {}} busy={busy}>
       <p>
         초대 링크로 가입한 사람은 나와 완전히 독립된 자신만의 일정을 갖게
-        됩니다. 링크는 7일간 유효하며 한 번만 사용할 수 있습니다.
+        됩니다. 링크는 7일간 유효하며, 취소하기 전까지 여러 명이 함께 가입할
+        수 있습니다.
       </p>
       {error && (
         <p role="alert" className="error">
@@ -118,11 +116,11 @@ export function Invites() {
             <p>
               만든 날짜: {time(invite.createdAt)}
               <br />
-              {invite.usedAt
-                ? `사용됨: ${time(invite.usedAt)}${invite.usedByEmail ? ` · ${invite.usedByEmail}` : ""}`
-                : `만료: ${time(invite.expiresAt)}`}
+              만료: {time(invite.expiresAt)}
+              <br />
+              가입한 인원: {invite.usesCount}명
             </p>
-            {!invite.usedAt && !invite.revokedAt && (
+            {!invite.revokedAt && (
               <button disabled={busy} onClick={() => setConfirm(invite)}>
                 취소
               </button>
@@ -152,8 +150,8 @@ export function Invites() {
           }}
         >
           <p>
-            아직 사용되지 않은 초대를 취소할까요? 이 링크로는 더 이상 가입할
-            수 없습니다.
+            초대를 취소할까요? 이미 가입한 사람은 그대로 유지되며, 이 링크로는
+            더 이상 새로 가입할 수 없습니다.
           </p>
         </ConfirmDialog>
       )}

@@ -84,15 +84,10 @@ export function authRoutes(
     const invite = store.db
       .prepare("SELECT * FROM invites WHERE token_hash=?")
       .get(hash(raw));
-    if (
-      !invite ||
-      invite.used_at ||
-      invite.revoked_at ||
-      Number(invite.expires_at) <= Date.now()
-    )
+    if (!invite || invite.revoked_at || Number(invite.expires_at) <= Date.now())
       throw new HttpError(
         404,
-        "초대 링크가 만료되었거나 이미 사용되었습니다.",
+        "초대 링크가 만료되었거나 취소되었습니다.",
       );
     const inviter = store.user(String(invite.created_by));
     res
@@ -206,15 +201,15 @@ export function authRoutes(
             .get(hash(inviteToken)) as
             | {
                 id: string;
-                used_at: number | null;
                 revoked_at: number | null;
                 expires_at: number;
               }
             | undefined)
         : undefined;
+      // Invite links are reusable by design: any number of people may sign up
+      // through the same link until it expires or is explicitly revoked.
       const inviteValid =
         inviteRow &&
-        !inviteRow.used_at &&
         !inviteRow.revoked_at &&
         Number(inviteRow.expires_at) > Date.now();
       if (!founding && !inviteValid) {
@@ -225,8 +220,8 @@ export function authRoutes(
         const created = store.createUser(p.email!.toLowerCase(), p.sub!);
         if (inviteValid)
           store.db
-            .prepare("UPDATE invites SET used_by=?, used_at=? WHERE id=?")
-            .run(created.id, Date.now(), inviteRow!.id);
+            .prepare("INSERT OR IGNORE INTO invite_uses VALUES(?,?,?)")
+            .run(inviteRow!.id, created.id, Date.now());
         return created;
       });
     }

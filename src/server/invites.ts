@@ -9,18 +9,16 @@ interface InviteRow {
   id: string;
   created_at: number;
   expires_at: number;
-  used_at: number | null;
-  used_by_email: string | null;
   revoked_at: number | null;
+  uses_count: number;
 }
 function metadata(row: InviteRow) {
   return {
     id: row.id,
     createdAt: new Date(row.created_at).toISOString(),
     expiresAt: new Date(row.expires_at).toISOString(),
-    usedAt: row.used_at ? new Date(row.used_at).toISOString() : null,
-    usedByEmail: row.used_by_email,
     revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : null,
+    usesCount: row.uses_count,
   };
 }
 export function inviteRoutes(app: Express, store: Store, cfg: Config) {
@@ -37,7 +35,7 @@ export function inviteRoutes(app: Express, store: Store, cfg: Config) {
     const user = res.locals.user as User;
     const rows = store.db
       .prepare(
-        "SELECT i.*, u.email AS used_by_email FROM invites i LEFT JOIN users u ON u.id=i.used_by WHERE i.created_by=? ORDER BY i.created_at DESC",
+        "SELECT i.*, (SELECT count(*) FROM invite_uses u WHERE u.invite_id=i.id) AS uses_count FROM invites i WHERE i.created_by=? ORDER BY i.created_at DESC",
       )
       .all(user.id) as unknown as InviteRow[];
     res.json({ invites: rows.map(metadata) });
@@ -46,7 +44,7 @@ export function inviteRoutes(app: Express, store: Store, cfg: Config) {
     const user = res.locals.user as User;
     const active = store.db
       .prepare(
-        "SELECT count(*) AS n FROM invites WHERE created_by=? AND used_at IS NULL AND revoked_at IS NULL AND expires_at>?",
+        "SELECT count(*) AS n FROM invites WHERE created_by=? AND revoked_at IS NULL AND expires_at>?",
       )
       .get(user.id, Date.now())!;
     if (Number(active.n) >= 20)
@@ -74,7 +72,7 @@ export function inviteRoutes(app: Express, store: Store, cfg: Config) {
     const user = res.locals.user as User;
     const result = store.db
       .prepare(
-        "UPDATE invites SET revoked_at=? WHERE id=? AND created_by=? AND used_at IS NULL AND revoked_at IS NULL",
+        "UPDATE invites SET revoked_at=? WHERE id=? AND created_by=? AND revoked_at IS NULL",
       )
       .run(Date.now(), String(req.params.id), user.id);
     if (!result.changes) throw new HttpError(404, "초대를 찾을 수 없습니다.");

@@ -215,7 +215,7 @@ test("A share link only exposes the sharing user's own public items", async () =
   }
 });
 
-test("Invite tokens are single-use, expire on revoke, and signup is refused without one", async () => {
+test("Invite links are reusable by many accounts until revoked, and signup is refused without one", async () => {
   const restore = mockGoogle();
   const f = await fixture();
   try {
@@ -223,28 +223,30 @@ test("Invite tokens are single-use, expire on revoke, and signup is refused with
     const inv = await invite(f, first.session!);
     const second = await login(f.base, f.store, "second@example.com", "sub-2", inv.token);
     assert.equal(second.status, 302);
-    // Reusing the same (now consumed) invite for a third account must fail.
+    // The same invite link can be reused by a different new account too.
     const third = await login(f.base, f.store, "third@example.com", "sub-3", inv.token);
-    assert.equal(third.status, 403);
+    assert.equal(third.status, 302);
     assert.equal(
       f.store.db.prepare("SELECT count(*) AS n FROM users").get()!.n,
-      2,
+      3,
     );
+    const list = await (await f.call("/api/invites", first.session)).json();
+    assert.equal(list.invites[0].usesCount, 2);
     // An unrelated account with no invite at all is refused, not silently signed up.
     const stranger = await login(f.base, f.store, "stranger@example.com", "sub-4");
     assert.equal(stranger.status, 403);
-    // A revoked invite can no longer be consumed.
-    const inv2 = await invite(f, first.session!);
-    const revoke = await f.call(`/api/invites/${inv2.id}/revoke`, first.session, {
+    // Revoking the invite stops any further new signups through it, but
+    // does not affect the accounts that already joined via it.
+    const revoke = await f.call(`/api/invites/${inv.id}/revoke`, first.session, {
       method: "POST",
       body: "{}",
     });
     assert.equal(revoke.status, 200);
-    const fourth = await login(f.base, f.store, "fourth@example.com", "sub-5", inv2.token);
+    const fourth = await login(f.base, f.store, "fourth@example.com", "sub-5", inv.token);
     assert.equal(fourth.status, 403);
     assert.equal(
       f.store.db.prepare("SELECT count(*) AS n FROM users").get()!.n,
-      2,
+      3,
     );
   } finally {
     restore();
