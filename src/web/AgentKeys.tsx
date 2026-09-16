@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.js";
 import { Modal } from "./Modal.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 type Key = {
   id: string;
   name: string;
@@ -293,24 +294,19 @@ export function AgentKeys({
           )}
         </section>
         {confirm && (
-          <section
-            className="issued-key"
-            role="group"
-            aria-label="키 폐기 확인"
+          <ConfirmDialog
+            title="키를 폐기할까요?"
+            danger
+            busy={busy}
+            confirmLabel="폐기하기"
+            onCancel={() => setConfirm(null)}
+            onConfirm={() => void revoke()}
           >
             <p>
               ‘{confirm.name}’ 키를 폐기할까요? 연결된 에이전트의 접근이 즉시
               중단되며 되돌릴 수 없습니다.
             </p>
-            <div className="settings-actions">
-              <button disabled={busy} onClick={() => setConfirm(null)}>
-                취소
-              </button>
-              <button disabled={busy} onClick={() => void revoke()}>
-                폐기하기
-              </button>
-            </div>
-          </section>
+          </ConfirmDialog>
         )}
       </div>
     </Modal>

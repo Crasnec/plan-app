@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.js";
 import { Modal } from "./Modal.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 type Connection = {
   id: string;
   name: string;
@@ -25,7 +26,7 @@ export function McpConnections() {
   const refresh = async () =>
     setConnections(
       (await api<{ keys: Connection[] }>("/agent-keys")).keys.filter(
-        (key) => key.kind === "mcp",
+        (key) => key.kind === "mcp" && !key.revokedAt,
       ),
     );
   useEffect(() => {
@@ -65,9 +66,7 @@ export function McpConnections() {
       ) : (
         connections.map((connection) => (
           <article className="session-card" key={connection.id}>
-            <h4>
-              {connection.name} · {connection.revokedAt ? "폐기됨" : "연결됨"}
-            </h4>
+            <h4>{connection.name} · 연결됨</h4>
             <p>
               유효기한 없음 · 연결: {time(connection.createdAt)}
               <br />
@@ -88,42 +87,38 @@ export function McpConnections() {
                 )
                 .join(" · ")}
             </p>
-            {!connection.revokedAt && (
-              <button disabled={busy} onClick={() => setConfirm(connection)}>
-                연결 폐기
-              </button>
-            )}
+            <button disabled={busy} onClick={() => setConfirm(connection)}>
+              연결 폐기
+            </button>
           </article>
         ))
       )}
       {confirm && (
-        <section className="session-confirm" aria-label="MCP 연결 폐기 확인">
+        <ConfirmDialog
+          title="연결을 폐기할까요?"
+          danger
+          busy={busy}
+          confirmLabel="폐기하기"
+          onCancel={() => setConfirm(null)}
+          onConfirm={async () => {
+            setBusy(true);
+            setError("");
+            try {
+              await api(`/agent-keys/${confirm.id}/revoke`, {});
+              setConfirm(null);
+              await refresh();
+            } catch (e) {
+              setError((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
           <p>
             ‘{confirm.name}’ 연결을 폐기할까요? 일정은 삭제되지 않으며, 접근만
             즉시 차단합니다. 이 작업은 취소 버튼으로 되돌릴 수 없습니다.
           </p>
-          <button disabled={busy} onClick={() => setConfirm(null)}>
-            돌아가기
-          </button>
-          <button
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError("");
-              try {
-                await api(`/agent-keys/${confirm.id}/revoke`, {});
-                setConfirm(null);
-                await refresh();
-              } catch (e) {
-                setError((e as Error).message);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            폐기하기
-          </button>
-        </section>
+        </ConfirmDialog>
       )}
     </Modal>
   );

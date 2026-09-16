@@ -31,6 +31,10 @@ const weekdays = [
   "금요일",
   "토요일",
 ];
+// The server only ever stores a hash of the share token, so the plaintext
+// URL can't be re-fetched later; remember it in this browser only so
+// reopening settings still shows the link that's actually active.
+const SHARE_URL_KEY = "plan.share-url";
 function App() {
   const [preferences, setPreferences] =
     useState<Preferences>(defaultPreferences);
@@ -999,7 +1003,16 @@ function Settings({
         .catch((e) => setError(e.message));
     if (panel === "share")
       api<{ active: boolean }>("/share")
-        .then((x) => setActive(x.active))
+        .then((x) => {
+          setActive(x.active);
+          try {
+            const stored = localStorage.getItem(SHARE_URL_KEY);
+            if (x.active && stored) setUrl(stored);
+            else if (!x.active) localStorage.removeItem(SHARE_URL_KEY);
+          } catch {
+            /* Keep the panel usable when storage is unavailable. */
+          }
+        })
         .catch((e) => setError(e.message));
     if (panel === "notifications" && "serviceWorker" in navigator)
       navigator.serviceWorker
@@ -1100,6 +1113,11 @@ function Settings({
                   });
                   setUrl(data.url);
                   setActive(true);
+                  try {
+                    localStorage.setItem(SHARE_URL_KEY, data.url);
+                  } catch {
+                    /* Link still works; just won't be remembered. */
+                  }
                 })
               }
             >
@@ -1113,6 +1131,11 @@ function Settings({
                     await api("/share", { action: "disable" });
                     setUrl("");
                     setActive(false);
+                    try {
+                      localStorage.removeItem(SHARE_URL_KEY);
+                    } catch {
+                      /* Nothing left to clean up. */
+                    }
                   })
                 }
               >

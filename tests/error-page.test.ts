@@ -88,7 +88,7 @@ test("Browser errors are HTML; API and JSON clients keep JSON; denied OAuth acco
     );
     for (const status of [400, 401, 403, 404, 413, 429, 500, 503]) {
       assert.match(errorPage(status), /lang="ko"/);
-      assert.match(errorPage(status), new RegExp(`>${status}<`));
+      assert.match(errorPage(status), new RegExp(`>오류 ${status}<`));
     }
   } finally {
     OAuth2Client.prototype.getToken = originalGet;

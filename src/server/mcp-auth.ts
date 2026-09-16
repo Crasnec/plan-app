@@ -25,6 +25,11 @@ import {
 import { cookie, hash, owner, token } from "./auth.js";
 import { Store, HttpError } from "./store.js";
 import type { Config } from "./config.js";
+import {
+  renderConsent,
+  renderLoginPrompt,
+  renderRedirecting,
+} from "./mcp-pages.js";
 
 export const mcpScopes = ["items:read", "items:write", "items:delete"];
 const FOREVER = 8640000000000000; // Storage sentinel, never exposed as a connection expiry.
@@ -44,17 +49,6 @@ type Pending = {
   csrf?: string;
   session?: string;
 };
-const escape = (s: string) =>
-  s.replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        c
-      ]!,
-  );
-function page(body: string) {
-  return `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>하루의 계획 · ChatGPT 연결</title><style>body{font:16px/1.7 system-ui;background:#f4f3eb;color:#34432e;margin:0;padding:24px}main{max-width:520px;margin:5vh auto;background:#fffefa;padding:28px;border-radius:20px;overflow-wrap:anywhere}button,a{display:inline-block;padding:12px 20px;border-radius:10px;border:1px solid #a2b393;background:#e3eadb;color:#34432e;margin:8px 8px 0 0}label{display:block;margin:12px 0}small{color:#64755a}</style><main>${body}</main></html>`;
-}
 export class McpAuth implements OAuthServerProvider {
   readonly resource: string;
   readonly clientsStore: OAuthRegisteredClientsStore;
@@ -329,13 +323,8 @@ export class McpAuth implements OAuthServerProvider {
           "연결 요청이 만료되었습니다. ChatGPT에서 다시 연결해 주세요.",
         );
       if (!owner(req, this.store, this.cfg)) {
-        res
-          .type("html")
-          .send(
-            page(
-              `<h1>ChatGPT 연결</h1><p>하루의 계획 소유자 계정으로 로그인한 뒤 연결을 승인하세요.</p><a href="/auth/google?returnTo=${encodeURIComponent(`/mcp/connect?ticket=${ticket}`)}">Google로 로그인</a>`,
-            ),
-          );
+        const returnTo = `/auth/google?returnTo=${encodeURIComponent(`/mcp/connect?ticket=${ticket}`)}`;
+        res.type("html").send(renderLoginPrompt(returnTo));
         return;
       }
       const csrf = token();
@@ -353,27 +342,29 @@ export class McpAuth implements OAuthServerProvider {
         pending.clientId,
         "client",
       )!;
-      const names: Record<string, string> = {
-        "items:read": "비공개 일정·메모·휴지통 읽기",
-        "items:write": "일정 등록·수정·완료·복구",
-        "items:delete": "일정 삭제 (휴지통으로 이동)",
-      };
-      res
-        .type("html")
-        .send(
-          page(
-            `<h1>ChatGPT 연결 승인</h1><p>클라이언트: ${escape(client.client_name || "MCP 클라이언트")}</p><small>이름은 클라이언트가 제공한 정보입니다. 승인 후 ${escape(new URL(pending.redirectUri).origin)}으로 돌아갑니다. 연결은 별도 유효기한 없이 유지되며 설정 → MCP 연결에서 언제든 폐기할 수 있습니다.</small><form method="post" action="/mcp/connect"><input type="hidden" name="ticket" value="${escape(ticket)}"><input type="hidden" name="csrf" value="${csrf}">${pending.scopes.map((s) => `<label><input type="checkbox" name="scope" value="${s}" ${s === "items:read" ? "checked disabled" : ""}> ${names[s]}</label>`).join("")}<p>등록·수정·삭제 권한은 필요한 경우에만 선택하세요.</p><button name="decision" value="approve">연결 승인</button><button name="decision" value="deny">취소</button></form>`,
-          ),
-        );
+      res.type("html").send(
+        renderConsent({
+          clientName: client.client_name || "MCP 클라이언트",
+          redirectOrigin: new URL(pending.redirectUri).origin,
+          ticket,
+          csrf,
+          scopes: pending.scopes,
+        }),
+      );
     });
     app.post(
       "/mcp/connect",
       express.urlencoded({ extended: false, limit: "8kb" }),
       (req, res) => {
-        if (
-          !owner(req, this.store, this.cfg) ||
-          req.headers.origin !== this.cfg.origin
-        )
+        // A sandboxed/redirected navigation can report an opaque origin as the
+        // literal string "null" rather than omitting the header; treat both
+        // as "no origin to check" since the CSRF token + session cookie below
+        // already bind this submission to the approval that was rendered.
+        const originOk =
+          !req.headers.origin ||
+          req.headers.origin === "null" ||
+          req.headers.origin === this.cfg.origin;
+        if (!owner(req, this.store, this.cfg) || !originOk)
           throw new HttpError(403, "허용되지 않은 연결 승인 요청입니다.");
         const ticket =
           typeof req.body.ticket === "string" ? req.body.ticket : "";
@@ -445,7 +436,11 @@ export class McpAuth implements OAuthServerProvider {
           } else target.searchParams.set("error", "access_denied");
           this.remove(hash(ticket));
         });
-        res.redirect(303, target.href);
+        // The page's CSP sets form-action 'self', which browsers also apply to a
+        // 303 Location following a form submit — an HTTP redirect back to the
+        // ChatGPT origin here would be silently blocked. A meta-refresh page is a
+        // plain navigation, not a form action, so it isn't subject to that check.
+        res.type("html").send(renderRedirecting(target.href));
       },
     );
   }
