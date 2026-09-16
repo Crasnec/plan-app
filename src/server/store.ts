@@ -82,7 +82,8 @@ export class Store {
       INSERT OR IGNORE INTO migrations(version) VALUES(4);
       CREATE TABLE IF NOT EXISTS mcp_connections(key_id TEXT PRIMARY KEY REFERENCES agent_keys(id));
       CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT NOT NULL, google_sub TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, share_hash TEXT, preferences TEXT, history_version INTEGER NOT NULL DEFAULT 0);
-      CREATE TABLE IF NOT EXISTS invites(id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, created_by TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_by TEXT REFERENCES users(id), used_at INTEGER, revoked_at INTEGER);`);
+      CREATE TABLE IF NOT EXISTS invites(id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, created_by TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_by TEXT REFERENCES users(id), used_at INTEGER, revoked_at INTEGER);
+      CREATE TABLE IF NOT EXISTS invite_uses(invite_id TEXT NOT NULL REFERENCES invites(id), user_id TEXT NOT NULL REFERENCES users(id), used_at INTEGER NOT NULL, PRIMARY KEY(invite_id,user_id));`);
     if (!this.db.prepare("SELECT 1 FROM migrations WHERE version=5").get())
       this.transaction(() => {
         const now = Date.now(),
