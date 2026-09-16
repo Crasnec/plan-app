@@ -20,17 +20,14 @@ export function renderLoginPrompt(returnTo: string) {
       <LoginPage>
         <LoginCard>
           <span className="eyebrow">ChatGPT 연결</span>
-          <h1>소유자로 로그인해 주세요</h1>
-          <p>
-            하루의 계획 소유자 Google 계정으로 로그인한 뒤 연결을 승인할 수
-            있어요.
-          </p>
+          <h1>로그인해 주세요</h1>
+          <p>본인 Google 계정으로 로그인한 뒤 연결을 승인할 수 있어요.</p>
           <a className="primary login-button" href={returnTo}>
             Google로 로그인 <RightIcon />
           </a>
           <span className="login-note">
             <LockIcon size={14} />
-            소유자만 승인할 수 있습니다.
+            로그인한 본인 계정만 승인할 수 있습니다.
           </span>
         </LoginCard>
       </LoginPage>

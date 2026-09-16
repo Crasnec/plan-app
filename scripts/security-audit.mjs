@@ -62,12 +62,13 @@ try {
     status: response.status,
     body: await response.json(),
   });
+  const user = store.createUser(cfg.owner, "audit-google-sub");
   store.db
-    .prepare("INSERT INTO sessions VALUES(?,?)")
-    .run(hash("audit-session"), Date.now() + 60000);
+    .prepare("INSERT INTO sessions VALUES(?,?,?)")
+    .run(hash("audit-session"), Date.now() + 60000, user.id);
   store.db
-    .prepare("INSERT INTO sessions VALUES(?,?)")
-    .run(hash("second-session"), Date.now() + 60000);
+    .prepare("INSERT INTO sessions VALUES(?,?,?)")
+    .run(hash("second-session"), Date.now() + 60000, user.id);
   const stream = await fetch(`${origin}/api/events`, {
     headers: { Cookie: "plan_session=audit-session" },
   });

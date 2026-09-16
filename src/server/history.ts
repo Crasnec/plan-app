@@ -16,17 +16,17 @@ const canonical = (value: unknown): string => {
 export class History {
   private sessions = new Map<string, Stack>();
   constructor(private store: Store) {}
-  private snapshot(): Snapshot {
+  private snapshot(userId: string): Snapshot {
     return {
       items: this.store.db
-        .prepare("SELECT * FROM items ORDER BY id")
-        .all() as Row[],
+        .prepare("SELECT * FROM items WHERE user_id=? ORDER BY id")
+        .all(userId) as Row[],
       overrides: this.store.db
-        .prepare("SELECT * FROM overrides ORDER BY item_id,key")
-        .all() as Row[],
+        .prepare("SELECT * FROM overrides WHERE user_id=? ORDER BY item_id,key")
+        .all(userId) as Row[],
       trash: this.store.db
-        .prepare("SELECT * FROM trash ORDER BY id")
-        .all() as Row[],
+        .prepare("SELECT * FROM trash WHERE user_id=? ORDER BY id")
+        .all(userId) as Row[],
     };
   }
   private signature(snapshot: Snapshot) {
@@ -47,12 +47,12 @@ export class History {
       if (size > 16 * 1024 * 1024) this.sessions.delete(key);
     }
   }
-  record<T>(session: string, label: string, fn: () => T): T {
+  record<T>(userId: string, session: string, label: string, fn: () => T): T {
     this.prune();
     const { value, before, after } = this.store.transaction(() => {
-      const before = this.snapshot();
+      const before = this.snapshot(userId);
       const value = fn();
-      return { value, before, after: this.snapshot() };
+      return { value, before, after: this.snapshot(userId) };
     });
     if (this.signature(before) === this.signature(after)) return value;
     const stack = this.sessions.get(session) || {
@@ -86,7 +86,12 @@ export class History {
       redo: summary(stack?.redo.at(-1)),
     };
   }
-  apply(session: string, direction: "undo" | "redo", id: unknown) {
+  apply(
+    userId: string,
+    session: string,
+    direction: "undo" | "redo",
+    id: unknown,
+  ) {
     this.prune();
     const stack = this.sessions.get(session),
       entry = stack?.[direction].at(-1);
@@ -98,38 +103,42 @@ export class History {
     const expected = direction === "undo" ? entry.after : entry.before;
     const target = direction === "undo" ? entry.before : entry.after;
     this.store.transaction(() => {
-      const current = this.snapshot();
+      const current = this.snapshot(userId);
       if (this.signature(current) !== this.signature(expected))
         throw new HttpError(
           409,
           "다른 작업으로 일정이 변경되어 되돌릴 수 없습니다. 최신 일정을 확인해 주세요.",
         );
+      const user = this.store.user(userId);
       // Never reuse item versions: stale browser/agent writes must stay stale after undo/redo.
       const version =
         Math.max(
-          Number(this.store.setting("history_version") || 0),
+          user?.historyVersion || 0,
           ...current.items.map((r) => JSON.parse(String(r.data)).version),
           ...target.items.map((r) => JSON.parse(String(r.data)).version),
         ) + 1;
-      this.store.set("history_version", String(version));
-      this.store.db.exec(
-        "DELETE FROM overrides; DELETE FROM items; DELETE FROM trash;",
-      );
+      this.store.setUserHistoryVersion(userId, version);
+      this.store.db
+        .prepare("DELETE FROM overrides WHERE user_id=?")
+        .run(userId);
+      this.store.db.prepare("DELETE FROM items WHERE user_id=?").run(userId);
+      this.store.db.prepare("DELETE FROM trash WHERE user_id=?").run(userId);
       for (const row of target.items)
         this.store.db
-          .prepare("INSERT INTO items VALUES(?,?)")
+          .prepare("INSERT INTO items VALUES(?,?,?)")
           .run(
             row.id,
             JSON.stringify({ ...JSON.parse(String(row.data)), version }),
+            userId,
           );
       for (const row of target.overrides)
         this.store.db
-          .prepare("INSERT INTO overrides VALUES(?,?,?)")
-          .run(row.item_id, row.key, row.data);
+          .prepare("INSERT INTO overrides VALUES(?,?,?,?)")
+          .run(row.item_id, row.key, row.data, userId);
       for (const row of target.trash)
         this.store.db
-          .prepare("INSERT INTO trash VALUES(?,?,?,?)")
-          .run(row.id, row.title, row.deleted_at, row.data);
+          .prepare("INSERT INTO trash VALUES(?,?,?,?,?)")
+          .run(row.id, row.title, row.deleted_at, row.data, userId);
     });
     stack[direction].pop();
     entry.id = randomUUID();

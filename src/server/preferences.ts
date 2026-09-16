@@ -3,17 +3,17 @@ import {
   validPreferences,
   type Preferences,
 } from "../shared/preferences.js";
-import type { Store } from "./store.js";
-export function preferences(store: Store): Preferences {
+import type { User } from "./store.js";
+export function preferences(user: User): Preferences {
   try {
-    const value: unknown = JSON.parse(store.setting("preferences") || "null");
+    const value: unknown = JSON.parse(user.preferences || "null");
     return validPreferences(value) ? value : { ...defaultPreferences };
   } catch {
     return { ...defaultPreferences };
   }
 }
-export function apiDefaults(store: Store, input: unknown): unknown {
-  const p = preferences(store);
+export function apiDefaults(user: User, input: unknown): unknown {
+  const p = preferences(user);
   if (
     !p.applyToApi ||
     !input ||

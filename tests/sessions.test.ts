@@ -18,12 +18,14 @@ const cfg: Config = {
 };
 async function fixture() {
   const store = new Store(":memory:");
+  const user = store.createUser(cfg.owner, "test-sub");
   for (const session of ["current-secret", "other-secret", "expired-secret"])
     store.db
-      .prepare("INSERT INTO sessions VALUES(?,?)")
+      .prepare("INSERT INTO sessions VALUES(?,?,?)")
       .run(
         hash(session),
         Date.now() + (session === "expired-secret" ? -1 : 600000),
+        user.id,
       );
   const { app, close } = createApp(store, cfg);
   const server = app.listen(0, "127.0.0.1");
@@ -51,6 +53,7 @@ async function fixture() {
     });
   return {
     store,
+    user,
     request,
     cleanup: async () => {
       close();
@@ -162,8 +165,8 @@ test("Individual and bulk revocation preserve this session; self-revocation clea
       0,
     );
     f.store.db
-      .prepare("INSERT INTO sessions VALUES(?,?)")
-      .run(hash("third-secret"), Date.now() + 600000);
+      .prepare("INSERT INTO sessions VALUES(?,?,?)")
+      .run(hash("third-secret"), Date.now() + 600000, f.user.id);
     assert.equal(
       (await (await f.request("/api/sessions/revoke-others", {})).json()).count,
       1,

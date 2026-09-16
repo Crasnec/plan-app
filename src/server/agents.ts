@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response, type Express } from "express";
-import { hash, token, requireOwner } from "./auth.js";
-import { Store, HttpError } from "./store.js";
+import { hash, token, requireUser } from "./auth.js";
+import { Store, HttpError, type User } from "./store.js";
 import type { Config } from "./config.js";
 import {
   DAY,
@@ -29,6 +29,7 @@ interface KeyRow {
   mcp?: number;
   revoked_at: number | null;
   last_used_at: number | null;
+  user_id: string;
 }
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -54,28 +55,28 @@ function metadata(k: KeyRow) {
 
 // Management stays on the cookie-authenticated, same-origin API, never the bearer router.
 export function agentManagement(app: Express, store: Store, cfg: Config) {
-  app.use("/api/agent-keys", (req, _res, next) => {
-    requireOwner(req, store, cfg);
+  app.use("/api/agent-keys", (req, res, next) => {
+    res.locals.user = requireUser(req, store, cfg);
     if (req.headers.authorization)
       throw new HttpError(
         403,
-        "키 관리는 소유자 브라우저 세션으로만 가능합니다.",
+        "키 관리는 본인 브라우저 세션으로만 가능합니다.",
       );
     next();
   });
   app.get("/api/agent-keys", (_req, res) => {
+    const user = res.locals.user as User;
     const rows = store.db
       .prepare(
-        "SELECT k.*, EXISTS(SELECT 1 FROM mcp_connections c WHERE c.key_id=k.id) AS mcp FROM agent_keys k ORDER BY created_at DESC",
+        "SELECT k.*, EXISTS(SELECT 1 FROM mcp_connections c WHERE c.key_id=k.id) AS mcp FROM agent_keys k WHERE k.user_id=? ORDER BY created_at DESC",
       )
-      .all() as unknown as KeyRow[];
+      .all(user.id) as unknown as KeyRow[];
     res.json({ keys: rows.map(metadata) });
   });
   app.post("/api/agent-keys", (req, res) => {
+    const user = res.locals.user as User;
     const body = object(req.body);
     only(body, ["name", "scopes", "expiresInDays"]);
-    if (!cfg.demo && !store.setting("owner_sub"))
-      throw new HttpError(409, "먼저 소유자 Google 계정으로 로그인해 주세요.");
     const days = body.expiresInDays ?? 90;
     if (
       typeof body.name !== "string" ||
@@ -96,9 +97,9 @@ export function agentManagement(app: Express, store: Store, cfg: Config) {
       );
     const active = store.db
       .prepare(
-        "SELECT count(*) AS n FROM agent_keys WHERE revoked_at IS NULL AND expires_at>?",
+        "SELECT count(*) AS n FROM agent_keys WHERE user_id=? AND revoked_at IS NULL AND expires_at>?",
       )
-      .get(Date.now())!;
+      .get(user.id, Date.now())!;
     if (Number(active.n) >= 20)
       throw new HttpError(
         409,
@@ -111,15 +112,16 @@ export function agentManagement(app: Express, store: Store, cfg: Config) {
       name: body.name.trim(),
       token_hash: hash(secret),
       scopes: JSON.stringify([...new Set(body.scopes)]),
-      owner_email: cfg.owner.toLowerCase(),
-      owner_sub: store.setting("owner_sub"),
+      owner_email: user.email,
+      owner_sub: user.googleSub,
       created_at: now,
       expires_at: now + Number(days) * DAY,
       revoked_at: null,
       last_used_at: null,
+      user_id: user.id,
     };
     store.db
-      .prepare("INSERT INTO agent_keys VALUES(?,?,?,?,?,?,?,?,?,?)")
+      .prepare("INSERT INTO agent_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)")
       .run(
         row.id,
         row.name,
@@ -131,16 +133,18 @@ export function agentManagement(app: Express, store: Store, cfg: Config) {
         row.expires_at,
         null,
         null,
+        row.user_id,
       );
     res.status(201).json({ ...metadata(row), token: secret });
   });
   app.post("/api/agent-keys/:id/revoke", (req, res) => {
+    const user = res.locals.user as User;
     only(object(req.body), []);
     const result = store.db
       .prepare(
-        "UPDATE agent_keys SET revoked_at=coalesce(revoked_at,?) WHERE id=?",
+        "UPDATE agent_keys SET revoked_at=coalesce(revoked_at,?) WHERE id=? AND user_id=?",
       )
-      .run(Date.now(), String(req.params.id));
+      .run(Date.now(), String(req.params.id), user.id);
     if (!result.changes) throw new HttpError(404, "키를 찾을 수 없습니다.");
     store.db
       .prepare(
@@ -150,17 +154,18 @@ export function agentManagement(app: Express, store: Store, cfg: Config) {
     res.json({ ok: true });
   });
   app.get("/api/agent-keys/audit", (_req, res) => {
+    const user = res.locals.user as User;
     res.json({
       events: store.db
         .prepare(
-          "SELECT id,key_id AS keyId,method,action,status,created_at AS createdAt FROM agent_audit ORDER BY created_at DESC LIMIT 100",
+          "SELECT a.id,a.key_id AS keyId,a.method,a.action,a.status,a.created_at AS createdAt FROM agent_audit a JOIN agent_keys k ON k.id=a.key_id WHERE k.user_id=? ORDER BY a.created_at DESC LIMIT 100",
         )
-        .all(),
+        .all(user.id),
     });
   });
 }
 
-export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
+export function agentRouter(store: Store, cfg: Config, broadcast: (userId: string) => void) {
   const router = Router();
   const buckets = new Map<string, { count: number; reset: number }>();
   function limit(id: string, max: number, res: Response) {
@@ -200,9 +205,7 @@ export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
       !key ||
       key.revoked_at !== null ||
       key.expires_at <= Date.now() ||
-      key.owner_email !== cfg.owner.toLowerCase() ||
-      key.owner_sub !== store.setting("owner_sub") ||
-      (!cfg.demo && !key.owner_sub)
+      !key.user_id
     ) {
       limit(`ip:${req.socket.remoteAddress || "unknown"}`, 30, res);
       res.set("WWW-Authenticate", 'Bearer realm="plan-agent"');
@@ -223,6 +226,7 @@ export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
     const requestId = randomUUID();
     res.set("X-Request-Id", requestId);
     res.locals.agent = key;
+    res.locals.userId = key.user_id;
     store.db
       .prepare("UPDATE agent_keys SET last_used_at=? WHERE id=?")
       .run(Date.now(), key.id);
@@ -308,7 +312,7 @@ export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
         );
       return result;
     });
-    if (!replayed) broadcast();
+    if (!replayed) broadcast(key.user_id);
     res
       .set("Idempotency-Replayed", String(replayed))
       .status(result.status)
@@ -347,6 +351,7 @@ export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
   });
   router.get("/items", (req, res) => {
     need(res, "items:read");
+    const userId = res.locals.userId as string;
     const { from, to } = req.query;
     if (
       !validDate(from) ||
@@ -367,7 +372,7 @@ export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
     const limit = parse(req.query.limit, 100, 500),
       offset = parse(req.query.offset, 0, 1000000);
     if (limit < 1) throw new HttpError(400, "limit은 1 이상이어야 합니다.");
-    const all = store.list(from, to);
+    const all = store.list(userId, from, to);
     res.json({
       items: all.slice(offset, offset + limit),
       nextOffset: offset + limit < all.length ? offset + limit : null,
@@ -377,18 +382,24 @@ export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
   });
   router.get("/items/:id", (req, res) => {
     need(res, "items:read");
-    const item = store.item(String(req.params.id));
+    const userId = res.locals.userId as string;
+    const item = store.item(String(req.params.id), userId);
     if (item.deletedAt) throw new HttpError(404, "삭제된 일정입니다.");
     res.json({ item });
   });
   router.post("/items", (req, res) =>
-    mutation(req, res, "items:write", () => ({
-      status: 201,
-      data: { item: store.create(apiDefaults(store, req.body)) },
-    })),
+    mutation(req, res, "items:write", () => {
+      const userId = res.locals.userId as string;
+      const user = store.user(userId)!;
+      return {
+        status: 201,
+        data: { item: store.create(userId, apiDefaults(user, req.body)) },
+      };
+    }),
   );
   router.patch("/items/:id", (req, res) =>
     mutation(req, res, "items:write", () => {
+      const userId = res.locals.userId as string;
       const body = object(req.body);
       only(body, ["key", "version", "scope", "changes"]);
       const { key, version, scope } = identity(body),
@@ -406,11 +417,11 @@ export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
       ]);
       if (!Object.keys(changes).length)
         throw new HttpError(400, "변경할 필드를 지정해 주세요.");
-      const item = store.item(String(req.params.id));
+      const item = store.item(String(req.params.id), userId);
       if (item.deletedAt || !validKey(item, key))
         throw new HttpError(404, "회차를 찾을 수 없습니다.");
       const override = store
-        .overrides()
+        .overrides(userId)
         .find((o) => o.itemId === item.id && o.key === key);
       if (override?.deletedAt) throw new HttpError(404, "삭제된 회차입니다.");
       if (item.rule && scope === "one" && "rule" in changes)
@@ -423,27 +434,38 @@ export function agentRouter(store: Store, cfg: Config, broadcast: () => void) {
         ...override?.patch,
         ...changes,
       } as Fields;
-      const updated = store.mutate(item.id, key, version, scope, fields);
+      const updated = store.mutate(userId, item.id, key, version, scope, fields);
       return { status: 200, data: { item: updated, refreshRequired: true } };
     }),
   );
   router.delete("/items/:id", (req, res) =>
     mutation(req, res, "items:delete", () => {
+      const userId = res.locals.userId as string;
       const body = object(req.body);
       only(body, ["key", "version", "scope"]);
       const { key, version, scope } = identity(body);
-      store.mutate(String(req.params.id), key, version, scope, null, true);
+      store.mutate(
+        userId,
+        String(req.params.id),
+        key,
+        version,
+        scope,
+        null,
+        true,
+      );
       return { status: 200, data: { ok: true, refreshRequired: true } };
     }),
   );
   router.get("/trash", (_req, res) => {
     need(res, "items:read");
-    res.json({ items: store.trash() });
+    const userId = res.locals.userId as string;
+    res.json({ items: store.trash(userId) });
   });
   router.post("/trash/:id/restore", (req, res) =>
     mutation(req, res, "items:write", () => {
+      const userId = res.locals.userId as string;
       only(object(req.body), []);
-      store.restore(String(req.params.id));
+      store.restore(userId, String(req.params.id));
       return { status: 200, data: { ok: true } };
     }),
   );

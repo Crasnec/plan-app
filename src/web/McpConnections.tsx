@@ -46,7 +46,7 @@ export function McpConnections() {
         />
       </label>
       <p>
-        ChatGPT에서 OAuth · DCR로 연결하고 소유자 Google 계정으로 승인하세요.
+        ChatGPT에서 OAuth · DCR로 연결하고 본인 Google 계정으로 승인하세요.
         Client ID와 Secret은 비워 둡니다.
       </p>
       <p>

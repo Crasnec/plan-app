@@ -39,7 +39,7 @@ export function AgentKeys({
   const refresh = async () =>
     setKeys(
       (await api<{ keys: Key[] }>("/agent-keys")).keys.filter(
-        (key) => key.kind !== "mcp",
+        (key) => key.kind !== "mcp" && !key.revokedAt,
       ),
     );
   useEffect(() => {
@@ -252,11 +252,8 @@ export function AgentKeys({
             <p>아직 발급한 키가 없습니다.</p>
           ) : (
             keys.map((key) => {
-              const state = key.revokedAt
-                ? "폐기됨"
-                : Date.parse(key.expiresAt) <= Date.now()
-                  ? "만료됨"
-                  : "사용 가능";
+              const state =
+                Date.parse(key.expiresAt) <= Date.now() ? "만료됨" : "사용 가능";
               return (
                 <article className="agent-key-row" key={key.id}>
                   <h4>
@@ -279,15 +276,13 @@ export function AgentKeys({
                     최근 사용:{" "}
                     {key.lastUsedAt ? date(key.lastUsedAt) : "아직 없음"}
                   </p>
-                  {!key.revokedAt && (
-                    <button
-                      disabled={busy || !!issued}
-                      onClick={() => setConfirm(key)}
-                      aria-label={`${key.name} 키 폐기`}
-                    >
-                      폐기
-                    </button>
-                  )}
+                  <button
+                    disabled={busy || !!issued}
+                    onClick={() => setConfirm(key)}
+                    aria-label={`${key.name} 키 폐기`}
+                  >
+                    폐기
+                  </button>
                 </article>
               );
             })

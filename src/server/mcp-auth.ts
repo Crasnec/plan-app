@@ -22,7 +22,7 @@ import {
   InvalidTargetError,
   TooManyRequestsError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
-import { cookie, hash, owner, token } from "./auth.js";
+import { cookie, currentUser, hash, token } from "./auth.js";
 import { Store, HttpError } from "./store.js";
 import type { Config } from "./config.js";
 import {
@@ -188,12 +188,10 @@ export class McpAuth implements OAuthServerProvider {
     if (
       !key ||
       key.revoked_at !== null ||
+      !key.user_id ||
       !this.store.db
         .prepare("SELECT 1 FROM mcp_connections WHERE key_id=?")
         .get(grant.keyId) ||
-      key.owner_email !== this.cfg.owner.toLowerCase() ||
-      key.owner_sub !== this.store.setting("owner_sub") ||
-      (!this.cfg.demo && !key.owner_sub) ||
       grant.resource !== this.resource ||
       grant.scopes.some(
         (s) => !(JSON.parse(key.scopes as string) as string[]).includes(s),
@@ -261,13 +259,13 @@ export class McpAuth implements OAuthServerProvider {
   async verifyAccessToken(raw: string) {
     const grant = this.read<Grant>(hash(raw), "access");
     if (!grant) throw new InvalidTokenError("Invalid access token.");
-    this.key(grant);
+    const key = this.key(grant);
     return {
       token: raw,
       clientId: grant.clientId,
       scopes: grant.scopes,
       resource: new URL(grant.resource),
-      extra: { keyId: grant.keyId },
+      extra: { keyId: grant.keyId, userId: String(key.user_id) },
     };
   }
   revokeGrant(grant: Grant) {
@@ -322,7 +320,8 @@ export class McpAuth implements OAuthServerProvider {
           400,
           "연결 요청이 만료되었습니다. ChatGPT에서 다시 연결해 주세요.",
         );
-      if (!owner(req, this.store, this.cfg)) {
+      const user = currentUser(req, this.store, this.cfg);
+      if (!user) {
         const returnTo = `/auth/google?returnTo=${encodeURIComponent(`/mcp/connect?ticket=${ticket}`)}`;
         res.type("html").send(renderLoginPrompt(returnTo));
         return;
@@ -364,7 +363,8 @@ export class McpAuth implements OAuthServerProvider {
           !req.headers.origin ||
           req.headers.origin === "null" ||
           req.headers.origin === this.cfg.origin;
-        if (!owner(req, this.store, this.cfg) || !originOk)
+        const user = currentUser(req, this.store, this.cfg);
+        if (!user || !originOk)
           throw new HttpError(403, "허용되지 않은 연결 승인 요청입니다.");
         const ticket =
           typeof req.body.ticket === "string" ? req.body.ticket : "";
@@ -395,9 +395,9 @@ export class McpAuth implements OAuthServerProvider {
               Number(
                 this.store.db
                   .prepare(
-                    "SELECT count(*) AS n FROM agent_keys WHERE revoked_at IS NULL AND expires_at>?",
+                    "SELECT count(*) AS n FROM agent_keys WHERE user_id=? AND revoked_at IS NULL AND expires_at>?",
                   )
-                  .get(Date.now())!.n,
+                  .get(user.id, Date.now())!.n,
               ) >= 20
             )
               throw new HttpError(
@@ -409,18 +409,21 @@ export class McpAuth implements OAuthServerProvider {
             ];
             const id = randomUUID();
             this.store.db
-              .prepare("INSERT INTO agent_keys VALUES(?,?,?,?,?,?,?,?,?,?)")
+              .prepare(
+                "INSERT INTO agent_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+              )
               .run(
                 id,
                 "MCP · ChatGPT",
                 hash(token()),
                 JSON.stringify(scopes),
-                this.cfg.owner.toLowerCase(),
-                this.store.setting("owner_sub"),
+                user.email,
+                user.googleSub,
                 Date.now(),
                 FOREVER,
                 null,
                 null,
+                user.id,
               );
             this.store.db
               .prepare("INSERT INTO mcp_connections VALUES(?)")

@@ -125,6 +125,7 @@ test("OAuth invalid state formats and mismatches return 400", async () => {
 
 test("Logout closes only matching SSE sessions; revoked sessions cannot receive broadcasts", async () => {
   const f = await fixture();
+  const user = f.store.createUser(cfg.owner, "sub-sse");
   const streams: ReadableStreamDefaultReader<Uint8Array>[] = [];
   const read = (reader: ReadableStreamDefaultReader<Uint8Array>) => {
     let timer: ReturnType<typeof setTimeout>;
@@ -148,8 +149,8 @@ test("Logout closes only matching SSE sessions; revoked sessions cannot receive 
   try {
     for (const session of ["a", "b", "c"]) {
       f.store.db
-        .prepare("INSERT INTO sessions VALUES(?,?)")
-        .run(hash(session), Date.now() + 60000);
+        .prepare("INSERT INTO sessions VALUES(?,?,?)")
+        .run(hash(session), Date.now() + 60000, user.id);
       const r = await fetch(`${f.url}/api/events`, {
         headers: { Cookie: `plan_session=${session}` },
       });
@@ -180,8 +181,8 @@ test("Logout closes only matching SSE sessions; revoked sessions cannot receive 
     );
     assert.equal((await read(streams[2])).done, true);
     f.store.db
-      .prepare("INSERT INTO sessions VALUES(?,?)")
-      .run(hash("d"), Date.now() + 60000);
+      .prepare("INSERT INTO sessions VALUES(?,?,?)")
+      .run(hash("d"), Date.now() + 60000, user.id);
     const d = await fetch(`${f.url}/api/events`, {
       headers: { Cookie: "plan_session=d" },
     });

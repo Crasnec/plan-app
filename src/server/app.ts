@@ -1,17 +1,18 @@
 import express from "express";
 import type { Response } from "express";
 import { resolve } from "node:path";
-import { Store, HttpError } from "./store.js";
+import { Store, HttpError, type User } from "./store.js";
 import {
   authRoutes,
-  owner,
-  requireOwner,
+  currentUser,
+  requireUser,
   token,
   hash,
   cookie,
 } from "./auth.js";
 import { subscribe } from "./push.js";
 import { agentRouter, agentManagement } from "./agents.js";
+import { inviteRoutes } from "./invites.js";
 import type { Config } from "./config.js";
 import { validDate, dateDiff, type Scope } from "../shared/domain.js";
 import { errorPage } from "./error-page.js";
@@ -32,12 +33,18 @@ export function createApp(
     cfg.demo ? "demo" : hash(cookie(req, "plan_session"));
   const clients = new Map<
     Response,
-    { sessionHash: string; authorized: () => boolean; close: () => void }
+    {
+      sessionHash: string;
+      userId: string;
+      authorized: () => boolean;
+      close: () => void;
+    }
   >();
-  const broadcast = () => {
+  const broadcast = (userId: string) => {
     for (const [res, client] of clients) {
       if (!client.authorized()) client.close();
-      else res.write("event: change\ndata: {}\n\n");
+      else if (client.userId === userId)
+        res.write("event: change\ndata: {}\n\n");
     }
   };
   app.use((_req, res, next) => {
@@ -67,15 +74,16 @@ export function createApp(
     store.db.prepare("SELECT 1").get();
     res.json({ ok: true });
   });
-  app.get("/api/me", (req, res) =>
+  app.get("/api/me", (req, res) => {
+    const user = currentUser(req, store, cfg);
     res.json({
-      owner: owner(req, store, cfg),
-      email: !cfg.demo && owner(req, store, cfg) ? cfg.owner : null,
+      id: user?.id ?? null,
+      email: user?.email ?? null,
       demo: cfg.demo,
       loginReady: !!cfg.clientId && !!cfg.clientSecret,
       pushKey: cfg.vapidPublic,
-    }),
-  );
+    });
+  });
   authRoutes(app, store, cfg, (sessionHash) => {
     for (const client of clients.values()) {
       if (client.sessionHash === sessionHash) client.close();
@@ -92,17 +100,18 @@ export function createApp(
     )
       throw new HttpError(400, "조회 기간은 1~100일이어야 합니다.");
     const shared = typeof req.query.share === "string";
+    let userId: string;
     if (shared) {
-      if (
-        !req.query.share ||
-        hash(req.query.share as string) !== store.setting("share_hash")
-      )
+      const owner =
+        req.query.share && store.userByShareHash(hash(req.query.share as string));
+      if (!owner)
         throw new HttpError(
           404,
           "공유 링크가 만료되었거나 비활성화되었습니다.",
         );
-    } else requireOwner(req, store, cfg);
-    const data = store.list(from, to, shared);
+      userId = owner.id;
+    } else userId = requireUser(req, store, cfg).id;
+    const data = store.list(userId, from, to, shared);
     res.json(
       shared
         ? data.map((o) => ({
@@ -125,37 +134,41 @@ export function createApp(
         : data,
     );
   });
-  app.use("/api", (req, _res, next) => {
+  app.use("/api", (req, res, next) => {
     try {
-      requireOwner(req, store, cfg);
+      res.locals.user = requireUser(req, store, cfg);
       next();
     } catch (e) {
       next(e);
     }
   });
   agentManagement(app, store, cfg);
+  inviteRoutes(app, store, cfg);
   app.use("/api/preferences", (req, _res, next) => {
     if (req.headers.authorization)
       throw new HttpError(
         403,
-        "설정은 소유자 브라우저에서만 관리할 수 있습니다.",
+        "설정은 본인 브라우저에서만 관리할 수 있습니다.",
       );
     next();
   });
-  app.get("/api/preferences", (_req, res) => res.json(preferences(store)));
+  app.get("/api/preferences", (_req, res) =>
+    res.json(preferences(res.locals.user as User)),
+  );
   app.post("/api/preferences", (req, res) => {
+    const user = res.locals.user as User;
     if (!validPreferences(req.body))
       throw new HttpError(
         400,
         "설정 값을 확인해 주세요. 기본 소요 시간은 5~1440분입니다.",
       );
-    store.set("preferences", JSON.stringify(req.body));
-    broadcast();
-    res.json(preferences(store));
+    store.setUserPreferences(user.id, JSON.stringify(req.body));
+    broadcast(user.id);
+    res.json(preferences(store.user(user.id)!));
   });
   app.use("/api/history", (req, _res, next) =>
     req.headers.authorization
-      ? next(new HttpError(403, "되돌리기는 소유자 브라우저에서만 가능합니다."))
+      ? next(new HttpError(403, "되돌리기는 본인 브라우저에서만 가능합니다."))
       : next(),
   );
   app.get("/api/history", (req, res) =>
@@ -163,18 +176,26 @@ export function createApp(
   );
   for (const direction of ["undo", "redo"] as const)
     app.post(`/api/history/${direction}`, (req, res) => {
-      const state = history.apply(historySession(req), direction, req.body?.id);
-      broadcast();
+      const user = res.locals.user as User;
+      const state = history.apply(
+        user.id,
+        historySession(req),
+        direction,
+        req.body?.id,
+      );
+      broadcast(user.id);
       res.json(state);
     });
   app.post("/api/items", (req, res) => {
-    const item = history.record(historySession(req), "일정 생성", () =>
-      store.create(req.body),
+    const user = res.locals.user as User;
+    const item = history.record(user.id, historySession(req), "일정 생성", () =>
+      store.create(user.id, req.body),
     );
-    broadcast();
+    broadcast(user.id);
     res.status(201).json(item);
   });
   app.post("/api/items/:id/change", (req, res) => {
+    const user = res.locals.user as User;
     const { key, version, scope, fields, deleting } = req.body;
     if (
       typeof key !== "string" ||
@@ -183,10 +204,12 @@ export function createApp(
     )
       throw new HttpError(400, "변경 요청을 확인해 주세요.");
     const item = history.record(
+      user.id,
       historySession(req),
       deleting ? "일정 삭제" : "일정 변경",
       () =>
         store.mutate(
+          user.id,
           String(req.params.id),
           key,
           version,
@@ -195,42 +218,49 @@ export function createApp(
           deleting,
         ),
     );
-    broadcast();
+    broadcast(user.id);
     res.json(item);
   });
-  app.get("/api/trash", (_req, res) => res.json(store.trash()));
+  app.get("/api/trash", (_req, res) =>
+    res.json(store.trash((res.locals.user as User).id)),
+  );
   app.post("/api/trash/:id/restore", (req, res) => {
-    history.record(historySession(req), "휴지통 복구", () =>
-      store.restore(String(req.params.id)),
+    const user = res.locals.user as User;
+    history.record(user.id, historySession(req), "휴지통 복구", () =>
+      store.restore(user.id, String(req.params.id)),
     );
-    broadcast();
+    broadcast(user.id);
     res.json({ ok: true });
   });
   app.get("/api/share", (_req, res) =>
-    res.json({ active: !!store.setting("share_hash") }),
+    res.json({ active: !!(res.locals.user as User).shareHash }),
   );
   app.post("/api/share", (req, res) => {
+    const user = res.locals.user as User;
     if (req.body.action !== "rotate" && req.body.action !== "disable")
       throw new HttpError(400, "공유 설정을 확인해 주세요.");
     const value = req.body.action === "rotate" ? token() : "";
-    store.set("share_hash", value ? hash(value) : "");
-    broadcast();
+    store.setUserShareHash(user.id, value ? hash(value) : null);
+    broadcast(user.id);
     res.json({ url: value ? `${cfg.origin}/s/${value}` : null });
   });
   app.post("/api/push", (req, res) => {
+    const user = res.locals.user as User;
     if (!cfg.vapidPublic || !cfg.vapidPrivate)
       throw new HttpError(503, "알림 서버 설정이 아직 준비되지 않았습니다.");
-    res.json({ id: subscribe(store, req.body) });
+    res.json({ id: subscribe(store, user.id, req.body) });
   });
   app.post("/api/push/remove", (req, res) => {
+    const user = res.locals.user as User;
     if (typeof req.body.endpoint !== "string")
       throw new HttpError(400, "구독 정보가 필요합니다.");
     store.db
-      .prepare("DELETE FROM subscriptions WHERE id=?")
-      .run(hash(req.body.endpoint));
+      .prepare("DELETE FROM subscriptions WHERE id=? AND user_id=?")
+      .run(hash(req.body.endpoint), user.id);
     res.json({ ok: true });
   });
   app.get("/api/events", (req, res) => {
+    const user = res.locals.user as User;
     res.set({
       "Content-Type": "text/event-stream",
       Connection: "keep-alive",
@@ -244,7 +274,7 @@ export function createApp(
       res.end();
     };
     const timer = setInterval(() => {
-      if (!owner(req, store, cfg)) {
+      if (!currentUser(req, store, cfg)) {
         close();
         return;
       }
@@ -252,7 +282,8 @@ export function createApp(
     }, 20000);
     clients.set(res, {
       sessionHash: hash(cookie(req, "plan_session")),
-      authorized: () => owner(req, store, cfg),
+      userId: user.id,
+      authorized: () => !!currentUser(req, store, cfg),
       close,
     });
     res.on("close", () => {

@@ -2,10 +2,11 @@ import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { OAuth2Client, CodeChallengeMethod } from "google-auth-library";
 import type { Express, Request, Response } from "express";
 import type { Config } from "./config.js";
-import { Store, HttpError } from "./store.js";
+import { Store, HttpError, type User } from "./store.js";
 import { touchSession } from "./session-info.js";
 import { sessionRoutes } from "./sessions.js";
 import { errorPage } from "./error-page.js";
+import { renderInvitePrompt } from "./invite-pages.js";
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export const token = () => randomBytes(32).toString("base64url");
 export function cookie(req: Request, name: string) {
@@ -17,17 +18,30 @@ export function cookie(req: Request, name: string) {
       ?.slice(name.length + 1) || ""
   );
 }
-export function owner(req: Request, store: Store, cfg: Config) {
-  if (cfg.demo) return true;
-  const row = store.db
-    .prepare("SELECT expires FROM sessions WHERE hash=?")
-    .get(hash(cookie(req, "plan_session")));
-  const valid = !!row && Number(row.expires) > Date.now();
-  if (valid) touchSession(store, req, hash(cookie(req, "plan_session")));
-  return valid;
+const DAY = 86400000;
+const INVITE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+// Demo mode simulates one always-logged-in tenant with no real Google login.
+function demoUser(store: Store): User {
+  return store.userBySub("demo") || store.createUser("demo@localhost", "demo");
 }
-export const requireOwner = (req: Request, store: Store, cfg: Config) => {
-  if (!owner(req, store, cfg)) throw new HttpError(401, "로그인이 필요합니다.");
+export function currentUser(
+  req: Request,
+  store: Store,
+  cfg: Config,
+): User | null {
+  if (cfg.demo) return demoUser(store);
+  const sessionHash = hash(cookie(req, "plan_session"));
+  const row = store.db
+    .prepare("SELECT user_id, expires FROM sessions WHERE hash=?")
+    .get(sessionHash) as { user_id: string | null; expires: number } | undefined;
+  if (!row || Number(row.expires) <= Date.now() || !row.user_id) return null;
+  touchSession(store, req, sessionHash);
+  return store.user(row.user_id) ?? null;
+}
+export const requireUser = (req: Request, store: Store, cfg: Config): User => {
+  const user = currentUser(req, store, cfg);
+  if (!user) throw new HttpError(401, "로그인이 필요합니다.");
+  return user;
 };
 export function authRoutes(
   app: Express,
@@ -35,7 +49,7 @@ export function authRoutes(
   cfg: Config,
   revokeSession: (sessionHash: string) => void = () => {},
 ) {
-  // Global limits suit this single-owner app and cannot be bypassed with proxy headers.
+  // Global limits suit today's small user base and cannot be bypassed with proxy headers.
   const limits = new Map<string, { until: number; count: number }>();
   const limit = (name: string, max: number, res: Response) => {
     const now = Date.now();
@@ -63,6 +77,33 @@ export function authRoutes(
     sameSite: "lax" as const,
     path: "/",
   };
+  app.get("/invite/:token", (req, res) => {
+    const raw = String(req.params.token);
+    if (!INVITE_TOKEN.test(raw))
+      throw new HttpError(404, "초대 링크를 찾을 수 없습니다.");
+    const invite = store.db
+      .prepare("SELECT * FROM invites WHERE token_hash=?")
+      .get(hash(raw));
+    if (
+      !invite ||
+      invite.used_at ||
+      invite.revoked_at ||
+      Number(invite.expires_at) <= Date.now()
+    )
+      throw new HttpError(
+        404,
+        "초대 링크가 만료되었거나 이미 사용되었습니다.",
+      );
+    const inviter = store.user(String(invite.created_by));
+    res
+      .type("html")
+      .send(
+        renderInvitePrompt(
+          inviter?.email ?? "다른 사용자",
+          `/auth/google?invite=${raw}`,
+        ),
+      );
+  });
   app.get("/auth/google", async (req, res) => {
     limit("start", 5, res);
     if (!cfg.clientId || !cfg.clientSecret)
@@ -78,6 +119,10 @@ export function authRoutes(
       /^\/mcp\/connect\?ticket=[A-Za-z0-9_-]{43}$/.test(req.query.returnTo)
         ? req.query.returnTo
         : "/";
+    const invite =
+      typeof req.query.invite === "string" && INVITE_TOKEN.test(req.query.invite)
+        ? req.query.invite
+        : null;
     store.transaction(() => {
       store.db.prepare("DELETE FROM oauth WHERE expires<=?").run(Date.now());
       if (
@@ -92,7 +137,7 @@ export function authRoutes(
         .run(
           hash(state),
           Date.now() + 600000,
-          JSON.stringify({ nonce, verifier, returnTo }),
+          JSON.stringify({ nonce, verifier, returnTo, invite }),
         );
     });
     res.cookie("plan_oauth", state, { ...options, maxAge: 600000 });
@@ -133,7 +178,9 @@ export function authRoutes(
       typeof req.query.code !== "string"
     )
       throw new HttpError(400, "로그인을 완료하지 못했습니다.");
-    const { nonce, verifier, returnTo } = JSON.parse(row.data as string);
+    const { nonce, verifier, returnTo, invite } = JSON.parse(
+      row.data as string,
+    );
     const { tokens } = await oauth.getToken({
       code: req.query.code,
       codeVerifier: verifier,
@@ -147,28 +194,48 @@ export function authRoutes(
     const p = ticket.getPayload();
     if (!p || !p.email_verified || (p as unknown as { nonce: string }).nonce !== nonce)
       throw new HttpError(403, "로그인 요청을 확인할 수 없습니다.");
-    const subject = store.setting("owner_sub");
-    if (
-      p.email?.toLowerCase() !== cfg.owner.toLowerCase() ||
-      (subject && subject !== p.sub)
-    ) {
-      // Wrong Google account picked: retry with the pending returnTo intact
-      // instead of a generic error page that would otherwise drop it.
-      const retry =
-        typeof returnTo === "string" &&
-        /^\/mcp\/connect\?ticket=[A-Za-z0-9_-]{43}$/.test(returnTo)
-          ? `/auth/google?returnTo=${encodeURIComponent(returnTo)}`
-          : "/auth/google";
-      res.status(403).type("html").send(errorPage(403, retry));
-      return;
+    let user = store.userBySub(p.sub!);
+    if (!user) {
+      const noUsersYet = !store.db.prepare("SELECT 1 FROM users LIMIT 1").get();
+      const founding = noUsersYet && p.email!.toLowerCase() === cfg.owner.toLowerCase();
+      const inviteToken =
+        typeof invite === "string" && INVITE_TOKEN.test(invite) ? invite : null;
+      const inviteRow = inviteToken
+        ? (store.db
+            .prepare("SELECT * FROM invites WHERE token_hash=?")
+            .get(hash(inviteToken)) as
+            | {
+                id: string;
+                used_at: number | null;
+                revoked_at: number | null;
+                expires_at: number;
+              }
+            | undefined)
+        : undefined;
+      const inviteValid =
+        inviteRow &&
+        !inviteRow.used_at &&
+        !inviteRow.revoked_at &&
+        Number(inviteRow.expires_at) > Date.now();
+      if (!founding && !inviteValid) {
+        res.status(403).type("html").send(errorPage(403));
+        return;
+      }
+      user = store.transaction(() => {
+        const created = store.createUser(p.email!.toLowerCase(), p.sub!);
+        if (inviteValid)
+          store.db
+            .prepare("UPDATE invites SET used_by=?, used_at=? WHERE id=?")
+            .run(created.id, Date.now(), inviteRow!.id);
+        return created;
+      });
     }
-    store.set("owner_sub", p.sub);
     const session = token();
     store.db
-      .prepare("INSERT INTO sessions VALUES(?,?)")
-      .run(hash(session), Date.now() + 30 * 86400000);
+      .prepare("INSERT INTO sessions VALUES(?,?,?)")
+      .run(hash(session), Date.now() + 30 * DAY, user.id);
     touchSession(store, req, hash(session), Date.now());
-    res.cookie("plan_session", session, { ...options, maxAge: 30 * 86400000 });
+    res.cookie("plan_session", session, { ...options, maxAge: 30 * DAY });
     res.redirect(
       typeof returnTo === "string" &&
         /^\/mcp\/connect\?ticket=[A-Za-z0-9_-]{43}$/.test(returnTo)

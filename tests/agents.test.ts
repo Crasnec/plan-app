@@ -37,8 +37,8 @@ test("API defaults are opt-in, omission-only, and idempotent across preference c
         idempotency,
       });
     assert.equal((await create(fields, "defaults-off")).status, 400);
-    f.store.set(
-      "preferences",
+    f.store.setUserPreferences(
+      f.user.id,
       JSON.stringify({
         durationMinutes: 45,
         showCompleted: false,
@@ -79,8 +79,8 @@ test("API defaults are opt-in, omission-only, and idempotent across preference c
         .status,
       403,
     );
-    f.store.set(
-      "preferences",
+    f.store.setUserPreferences(
+      f.user.id,
       JSON.stringify({
         durationMinutes: 120,
         showCompleted: true,
@@ -96,10 +96,10 @@ test("API defaults are opt-in, omission-only, and idempotent across preference c
 });
 async function fixture() {
   const store = new Store(":memory:");
-  store.set("owner_sub", "test-google-sub");
+  const user = store.createUser(cfg.owner, "test-google-sub");
   store.db
-    .prepare("INSERT INTO sessions VALUES(?,?)")
-    .run(hash("owner-session"), Date.now() + 60000);
+    .prepare("INSERT INTO sessions VALUES(?,?,?)")
+    .run(hash("owner-session"), Date.now() + 60000, user.id);
   const { app, close } = createApp(store, cfg);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve, reject) => {
@@ -158,6 +158,7 @@ async function fixture() {
   }
   return {
     store,
+    user,
     call,
     issue,
     cleanup: async () => {
@@ -220,7 +221,7 @@ test("read key reads private entries but cannot create, patch, delete or restore
   const f = await fixture();
   try {
     const k = await f.issue(),
-      item = f.store.create({
+      item = f.store.create(f.user.id, {
         ...defaultFields("2026-09-10"),
         title: "private",
       });
@@ -254,7 +255,7 @@ test("read key reads private entries but cannot create, patch, delete or restore
         ).status,
         403,
       );
-    assert.equal(f.store.item(item.id).title, "private");
+    assert.equal(f.store.item(item.id, f.user.id).title, "private");
   } finally {
     await f.cleanup();
   }
@@ -283,7 +284,7 @@ test("API requires a bearer even with valid owner cookie; no query token or cros
     await f.cleanup();
   }
 });
-test("expiry, revocation and owner identity changes invalidate keys immediately", async () => {
+test("expiry and revocation invalidate keys immediately; another tenant's key sees nothing", async () => {
   const f = await fixture();
   try {
     const k = await f.issue();
@@ -298,9 +299,39 @@ test("expiry, revocation and owner identity changes invalidate keys immediately"
       body: {},
     });
     assert.equal((await f.call(`${base}/me`, { token: k2.token })).status, 401);
-    const k3 = await f.issue();
-    f.store.set("owner_sub", "different-google-sub");
-    assert.equal((await f.call(`${base}/me`, { token: k3.token })).status, 401);
+    const other = f.store.createUser("other@example.com", "other-sub");
+    const item = f.store.create(f.user.id, {
+      ...defaultFields("2026-09-10"),
+      title: "tenant one only",
+    });
+    const otherToken = `plan_agent_${"o".repeat(43)}`;
+    f.store.db
+      .prepare(
+        "INSERT INTO agent_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .run(
+        "other-key",
+        "other agent",
+        hash(otherToken),
+        JSON.stringify(["items:read"]),
+        other.email,
+        other.googleSub,
+        Date.now(),
+        Date.now() + DAY,
+        null,
+        null,
+        other.id,
+      );
+    const otherList = await f.call(
+      `${base}/items?from=2026-09-01&to=2026-10-01`,
+      { token: otherToken },
+    );
+    assert.equal(otherList.status, 200);
+    assert.deepEqual(otherList.data.items, []);
+    const otherGet = await f.call(`${base}/items/${item.id}`, {
+      token: otherToken,
+    });
+    assert.equal(otherGet.status, 404);
   } finally {
     await f.cleanup();
   }
@@ -325,7 +356,7 @@ test("idempotent create replays once, validates fingerprint, and checks authoriz
     assert.equal(replay.status, 201);
     assert.equal(replay.headers.get("Idempotency-Replayed"), "true");
     assert.equal(first.data.item.id, replay.data.item.id);
-    assert.equal(f.store.items().length, 1);
+    assert.equal(f.store.items(f.user.id).length, 1);
     assert.equal(
       (
         await f.call(`${base}/items`, {
@@ -349,7 +380,7 @@ test("write key updates with version checks; deletion requires its own scope", a
   const f = await fixture();
   try {
     const k = await f.issue(["items:read", "items:write"]);
-    const i = f.store.create({ ...defaultFields(), title: "original" });
+    const i = f.store.create(f.user.id, { ...defaultFields(), title: "original" });
     const body = {
       key: "single",
       version: 1,
@@ -367,7 +398,7 @@ test("write key updates with version checks; deletion requires its own scope", a
       ).status,
       200,
     );
-    assert.equal(f.store.item(i.id).version, 2);
+    assert.equal(f.store.item(i.id, f.user.id).version, 2);
     assert.equal(
       (
         await f.call(`${base}/items/${i.id}`, {
@@ -415,7 +446,7 @@ test("write key updates with version checks; deletion requires its own scope", a
       ).status,
       200,
     );
-    assert.equal(f.store.item(i.id).deletedAt, null);
+    assert.equal(f.store.item(i.id, f.user.id).deletedAt, null);
   } finally {
     await f.cleanup();
   }
@@ -434,7 +465,7 @@ test("mutation rejects absent idempotency, bad scopes, unknown fields and invali
       400,
     );
     const k = await f.issue(["items:read", "items:write"]);
-    const item = f.store.create({ ...defaultFields(), title: "test" });
+    const item = f.store.create(f.user.id, { ...defaultFields(), title: "test" });
     assert.equal(
       (
         await f.call(`${base}/items`, {
@@ -469,7 +500,7 @@ test("mutation rejects absent idempotency, bad scopes, unknown fields and invali
       ).status,
       400,
     );
-    assert.equal(f.store.item(item.id).version, 1);
+    assert.equal(f.store.item(item.id, f.user.id).version, 1);
   } finally {
     await f.cleanup();
   }
@@ -479,7 +510,7 @@ test("pagination and OpenAPI contract are available; audit contains no credentia
   try {
     const k = await f.issue(["items:read", "items:write"]);
     for (let n = 0; n < 3; n++)
-      f.store.create({
+      f.store.create(f.user.id, {
         ...defaultFields("2026-09-10"),
         title: `confidential-${n}`,
       });
@@ -533,7 +564,7 @@ test("failed mutation rolls back data and replay record together", async () => {
       body: { ...defaultFields(), title: "must rollback" },
     });
     assert.equal(result.status, 500);
-    assert.equal(f.store.items().length, 0);
+    assert.equal(f.store.items(f.user.id).length, 0);
     assert.equal(
       f.store.db.prepare("SELECT count(*) AS n FROM agent_requests").get()!.n,
       0,
