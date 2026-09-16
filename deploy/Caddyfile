@@ -8,3 +8,8 @@ plan.crasnec.com {
         flush_interval -1
     }
 }
+
+dev.crasnec.com {
+    encode zstd gzip
+    reverse_proxy gateway:3000
+}

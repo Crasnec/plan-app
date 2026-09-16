@@ -5,6 +5,7 @@ import type { Config } from "./config.js";
 import { Store, HttpError } from "./store.js";
 import { touchSession } from "./session-info.js";
 import { sessionRoutes } from "./sessions.js";
+import { errorPage } from "./error-page.js";
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export const token = () => randomBytes(32).toString("base64url");
 export function cookie(req: Request, name: string) {
@@ -144,16 +145,23 @@ export function authRoutes(
       audience: cfg.clientId,
     });
     const p = ticket.getPayload();
-    if (
-      !p ||
-      !p.email_verified ||
-      p.email?.toLowerCase() !== cfg.owner.toLowerCase() ||
-      (p as unknown as { nonce: string }).nonce !== nonce
-    )
-      throw new HttpError(403, "이 계정에는 편집 권한이 없습니다.");
+    if (!p || !p.email_verified || (p as unknown as { nonce: string }).nonce !== nonce)
+      throw new HttpError(403, "로그인 요청을 확인할 수 없습니다.");
     const subject = store.setting("owner_sub");
-    if (subject && subject !== p.sub)
-      throw new HttpError(403, "등록된 소유자 계정과 일치하지 않습니다.");
+    if (
+      p.email?.toLowerCase() !== cfg.owner.toLowerCase() ||
+      (subject && subject !== p.sub)
+    ) {
+      // Wrong Google account picked: retry with the pending returnTo intact
+      // instead of a generic error page that would otherwise drop it.
+      const retry =
+        typeof returnTo === "string" &&
+        /^\/mcp\/connect\?ticket=[A-Za-z0-9_-]{43}$/.test(returnTo)
+          ? `/auth/google?returnTo=${encodeURIComponent(returnTo)}`
+          : "/auth/google";
+      res.status(403).type("html").send(errorPage(403, retry));
+      return;
+    }
     store.set("owner_sub", p.sub);
     const session = token();
     store.db

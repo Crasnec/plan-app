@@ -96,8 +96,11 @@ async function fixture(path = ":memory:") {
       },
       body,
     });
-    assert.equal(approval.status, 303, await approval.clone().text());
-    const redirect = new URL(approval.headers.get("location")!);
+    assert.equal(approval.status, 200, await approval.clone().text());
+    const html = await approval.text();
+    const target = html.match(/content="0;url=([^"]+)"/)?.[1];
+    assert(target, html);
+    const redirect = new URL(target.replace(/&amp;/g, "&"));
     assert.equal(redirect.searchParams.get("state"), "test-state");
     const code = redirect.searchParams.get("code")!;
     return { ...flow, code };
