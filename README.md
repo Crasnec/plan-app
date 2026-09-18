@@ -217,3 +217,12 @@ PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/screenshot
 `.env`, OAuth 원본 파일, DB, 백업과 테스트 산출물은 Git에서 제외합니다. 문서용 스크린샷은 의도적으로 공개하므로 교체할 때에도 데모 데이터만 사용하세요.
 
 참고한 공식 문서: [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect), [Node.js SQLite](https://nodejs.org/api/sqlite.html), [Web Push 라이브러리](https://github.com/web-push-libs/web-push).
+
+### 회원 탈퇴와 재가입
+
+설정 → 계정 → 회원 탈퇴에서 확인 문구를 입력하면 탈퇴합니다. `POST /api/account/withdraw`는 본인의 브라우저 세션, 동일 Origin의 JSON 요청, `{"confirmation":"회원 탈퇴"}`를 요구합니다. 데모와 Bearer 인증으로는 탈퇴할 수 없습니다.
+
+- `users.deleted_at`을 한 트랜잭션에서 기록합니다. 해당 계정의 일정·반복 예외·휴지통·설정·세션·알림 구독·발송 기록·API/MCP 연결·감사 및 재시도 기록·초대 사용 기록은 소유 계정의 삭제 상태를 상속하는 soft-delete입니다. 원본 행을 물리적으로 삭제하지 않으며 일반 보관 기간 정리에서도 제외합니다.
+- 모든 세션과 공유 링크가 즉시 무효화되고, API 키/MCP 연결과 발급한 초대 링크가 폐기되며, 알림 발송 대상에서 제외됩니다. 이미 초대로 가입한 다른 회원은 영향을 받지 않습니다.
+- 동일 Google 계정도 유효한 초대 링크로 재가입할 수 있습니다. 새 사용자 ID로 시작하며 이전 일정·설정·인증 정보는 복원되지 않습니다. 최초 운영자도 탈퇴 후에는 초대가 필요합니다.
+- 마이그레이션 7은 활성 Google 계정에만 고유 인덱스를 적용하고 기존 행과 외래 키를 보존합니다. 이후 알림 발송 기록에는 소유 계정도 저장합니다. 기존 발송 기록은 해시만 있어 소유자를 복원할 수 없으므로 자동 삭제하지 않고 보존합니다.

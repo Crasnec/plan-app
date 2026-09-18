@@ -85,6 +85,7 @@ export function createApp(
     });
   });
   authRoutes(app, store, cfg, (sessionHash) => {
+    history.forget(sessionHash);
     for (const client of clients.values()) {
       if (client.sessionHash === sessionHash) client.close();
     }

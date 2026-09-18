@@ -205,7 +205,8 @@ export function agentRouter(store: Store, cfg: Config, broadcast: (userId: strin
       !key ||
       key.revoked_at !== null ||
       key.expires_at <= Date.now() ||
-      !key.user_id
+      !key.user_id ||
+      !store.user(key.user_id)
     ) {
       limit(`ip:${req.socket.remoteAddress || "unknown"}`, 30, res);
       res.set("WWW-Authenticate", 'Bearer realm="plan-agent"');
