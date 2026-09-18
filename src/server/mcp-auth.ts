@@ -116,7 +116,17 @@ export class McpAuth implements OAuthServerProvider {
     const row = this.store.db
       .prepare("SELECT data FROM mcp_oauth WHERE id=? AND kind=? AND expires>?")
       .get(id, kind, Date.now());
-    return row ? (JSON.parse(row.data as string) as T) : undefined;
+    if (!row) return undefined;
+    const data = JSON.parse(row.data as string);
+    if (data.keyId) {
+      const key = this.store.db.prepare("SELECT user_id FROM agent_keys WHERE id=?").get(data.keyId);
+      if (!key || !this.store.user(String(key.user_id))) return undefined;
+    }
+    if (data.session) {
+      const session = this.store.db.prepare("SELECT user_id FROM sessions WHERE hash=?").get(data.session);
+      if (session && !this.store.user(String(session.user_id))) return undefined;
+    }
+    return data as T;
   }
   remove(id: string) {
     this.store.db.prepare("DELETE FROM mcp_oauth WHERE id=?").run(id);
@@ -140,7 +150,7 @@ export class McpAuth implements OAuthServerProvider {
     )
       throw new InvalidScopeError("Unsupported scopes.");
     this.store.db
-      .prepare("DELETE FROM mcp_oauth WHERE expires<=?")
+      .prepare("DELETE FROM mcp_oauth WHERE coalesce(json_extract(data,'$.keyId'),'') NOT IN (SELECT k.id FROM agent_keys k JOIN users u ON u.id=k.user_id WHERE u.deleted_at IS NOT NULL) AND coalesce(json_extract(data,'$.session'),'') NOT IN (SELECT s.hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE u.deleted_at IS NOT NULL) AND expires<=?")
       .run(Date.now());
     if (
       Number(
@@ -189,6 +199,7 @@ export class McpAuth implements OAuthServerProvider {
       !key ||
       key.revoked_at !== null ||
       !key.user_id ||
+      !this.store.user(String(key.user_id)) ||
       !this.store.db
         .prepare("SELECT 1 FROM mcp_connections WHERE key_id=?")
         .get(grant.keyId) ||

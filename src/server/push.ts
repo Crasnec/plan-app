@@ -34,6 +34,8 @@ export function validateSubscription(s: Subscription) {
 export function subscribe(store: Store, userId: string, input: Subscription) {
   const s = validateSubscription(input),
     id = hash(s.endpoint);
+  // Preserve a withdrawn account's subscription if the browser later registers anew.
+  store.db.prepare("UPDATE subscriptions SET id=id || ':deleted:' || user_id WHERE id=? AND user_id IN (SELECT id FROM users WHERE deleted_at IS NOT NULL)").run(id);
   store.db
     .prepare(
       "INSERT INTO subscriptions VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data, user_id=excluded.user_id",
@@ -61,6 +63,7 @@ export function pushWorker(
           .all() as { user_id: string }[]
       ).map((r) => r.user_id);
       for (const userId of userIds) {
+        if (store.isUserDeleted(userId)) continue;
         const occurrences = store.list(
           userId,
           addDays(today(), -8),
@@ -77,9 +80,9 @@ export function pushWorker(
             const id = hash(`${o.id}:${due}:${sub.id}`);
             store.db
               .prepare(
-                "INSERT OR IGNORE INTO deliveries VALUES(?,?,'pending',0,0)",
+                "INSERT OR IGNORE INTO deliveries VALUES(?,?,'pending',0,0,?)",
               )
-              .run(id, due);
+              .run(id, due, userId);
             const job = store.db
               .prepare("SELECT * FROM deliveries WHERE id=?")
               .get(id)!;
@@ -127,7 +130,7 @@ export function pushWorker(
                 .run(id);
             } catch (e) {
               const status = (e as { statusCode?: number }).statusCode;
-              if (status === 404 || status === 410)
+              if ((status === 404 || status === 410) && !store.isUserDeleted(userId))
                 store.db
                   .prepare("DELETE FROM subscriptions WHERE id=?")
                   .run(sub.id);

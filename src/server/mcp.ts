@@ -217,6 +217,7 @@ export function mountMcp(
       handlers.set(name, (raw) => {
         let status = 200;
         try {
+          if (!store.user(userId)) throw new HttpError(401, "탈퇴한 계정입니다.");
           if (!principal.scopes.includes(scope)) {
             status = 403;
             return {

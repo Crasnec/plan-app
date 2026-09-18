@@ -35,8 +35,10 @@ export function currentUser(
     .prepare("SELECT user_id, expires FROM sessions WHERE hash=?")
     .get(sessionHash) as { user_id: string | null; expires: number } | undefined;
   if (!row || Number(row.expires) <= Date.now() || !row.user_id) return null;
+  const user = store.user(row.user_id);
+  if (!user) return null;
   touchSession(store, req, sessionHash);
-  return store.user(row.user_id) ?? null;
+  return user;
 }
 export const requireUser = (req: Request, store: Store, cfg: Config): User => {
   const user = currentUser(req, store, cfg);
@@ -241,9 +243,20 @@ export function authRoutes(
   sessionRoutes(app, store, cfg, revokeSession, (res) => {
     res.clearCookie("plan_session", options);
   });
+  app.post("/api/account/withdraw", (req, res) => {
+    const user = requireUser(req, store, cfg);
+    if (cfg.demo || req.headers.authorization)
+      throw new HttpError(403, "회원 탈퇴는 본인 브라우저에서만 가능합니다.");
+    if (!req.body || req.body.confirmation !== "회원 탈퇴" || Object.keys(req.body).length !== 1)
+      throw new HttpError(400, "회원 탈퇴 확인 문구를 입력해 주세요.");
+    for (const sessionHash of store.withdrawUser(user.id)) revokeSession(sessionHash);
+    res.clearCookie("plan_session", options);
+    res.clearCookie("plan_oauth", options);
+    res.json({ ok: true });
+  });
   app.post("/api/logout", (req, res) => {
     const sessionHash = hash(cookie(req, "plan_session"));
-    store.db.prepare("DELETE FROM sessions WHERE hash=?").run(sessionHash);
+    store.db.prepare("DELETE FROM sessions WHERE hash=? AND user_id NOT IN (SELECT id FROM users WHERE deleted_at IS NOT NULL)").run(sessionHash);
     revokeSession(sessionHash);
     res.clearCookie("plan_session", options);
     res.json({ ok: true });

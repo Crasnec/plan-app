@@ -35,7 +35,7 @@ export function inviteRoutes(app: Express, store: Store, cfg: Config) {
     const user = res.locals.user as User;
     const rows = store.db
       .prepare(
-        "SELECT i.*, (SELECT count(*) FROM invite_uses u WHERE u.invite_id=i.id) AS uses_count FROM invites i WHERE i.created_by=? ORDER BY i.created_at DESC",
+        "SELECT i.*, (SELECT count(*) FROM invite_uses u WHERE u.invite_id=i.id AND u.user_id NOT IN (SELECT id FROM users WHERE deleted_at IS NOT NULL)) AS uses_count FROM invites i WHERE i.created_by=? ORDER BY i.created_at DESC",
       )
       .all(user.id) as unknown as InviteRow[];
     res.json({ invites: rows.map(metadata) });

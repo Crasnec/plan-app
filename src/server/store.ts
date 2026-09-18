@@ -125,6 +125,25 @@ export class Store {
           CREATE INDEX IF NOT EXISTS subscriptions_user ON subscriptions(user_id);`);
         this.db.exec("INSERT INTO migrations VALUES(6)");
       });
+    // Rebuild the identity index so a deleted Google identity can register anew.
+    if (!this.db.prepare("SELECT 1 FROM migrations WHERE version=7").get()) {
+      this.db.exec("PRAGMA foreign_keys=OFF");
+      try {
+        this.transaction(() => {
+          this.db.exec(`CREATE TABLE users_next(id TEXT PRIMARY KEY, email TEXT NOT NULL, google_sub TEXT NOT NULL, created_at INTEGER NOT NULL, share_hash TEXT, preferences TEXT, history_version INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER);
+            INSERT INTO users_next SELECT *,NULL FROM users;
+            DROP TABLE users;
+            ALTER TABLE users_next RENAME TO users;
+            CREATE UNIQUE INDEX users_active_sub ON users(google_sub) WHERE deleted_at IS NULL;
+            ALTER TABLE deliveries ADD COLUMN user_id TEXT;
+            INSERT INTO migrations VALUES(7);`);
+          if (this.db.prepare("PRAGMA foreign_key_check").get())
+            throw new Error("Account migration failed foreign key validation");
+        });
+      } finally {
+        this.db.exec("PRAGMA foreign_keys=ON");
+      }
+    }
   }
   transaction<T>(fn: () => T): T {
     if (this.transactionActive) return fn();
@@ -157,20 +176,20 @@ export class Store {
       .run(key, value);
   }
   user(id: string): User | undefined {
-    const row = this.db.prepare("SELECT * FROM users WHERE id=?").get(id) as
+    const row = this.db.prepare("SELECT * FROM users WHERE deleted_at IS NULL AND id=?").get(id) as
       | UserRow
       | undefined;
     return row && toUser(row);
   }
   userBySub(googleSub: string): User | undefined {
     const row = this.db
-      .prepare("SELECT * FROM users WHERE google_sub=?")
+      .prepare("SELECT * FROM users WHERE deleted_at IS NULL AND google_sub=?")
       .get(googleSub) as UserRow | undefined;
     return row && toUser(row);
   }
   userByShareHash(shareHash: string): User | undefined {
     const row = this.db
-      .prepare("SELECT * FROM users WHERE share_hash=?")
+      .prepare("SELECT * FROM users WHERE deleted_at IS NULL AND share_hash=?")
       .get(shareHash) as UserRow | undefined;
     return row && toUser(row);
   }
@@ -185,7 +204,7 @@ export class Store {
       history_version: 0,
     };
     this.db
-      .prepare("INSERT INTO users VALUES(?,?,?,?,?,?,?)")
+      .prepare("INSERT INTO users(id,email,google_sub,created_at,share_hash,preferences,history_version) VALUES(?,?,?,?,?,?,?)")
       .run(
         row.id,
         row.email,
@@ -196,6 +215,22 @@ export class Store {
         row.history_version,
       );
     return toUser(row);
+  }
+  isUserDeleted(id: string): boolean {
+    return !!this.db.prepare("SELECT 1 FROM users WHERE id=? AND deleted_at IS NOT NULL").get(id);
+  }
+  // Owned rows inherit this tombstone, including settings, trash, credentials,
+  // invitation usage and audit records. Keep their original contents for retention.
+  withdrawUser(id: string): string[] {
+    return this.transaction(() => {
+      if (!this.user(id)) throw new HttpError(401, "로그인이 필요합니다.");
+      const sessions = this.db.prepare("SELECT hash FROM sessions WHERE user_id=?").all(id);
+      const now = Date.now();
+      this.db.prepare("UPDATE users SET deleted_at=? WHERE id=?").run(now, id);
+      this.db.prepare("UPDATE agent_keys SET revoked_at=coalesce(revoked_at,?) WHERE user_id=?").run(now, id);
+      this.db.prepare("UPDATE invites SET revoked_at=coalesce(revoked_at,?) WHERE created_by=?").run(now, id);
+      return sessions.map((row) => String(row.hash));
+    });
   }
   setUserShareHash(id: string, shareHash: string | null) {
     this.db
@@ -213,18 +248,21 @@ export class Store {
       .run(version, id);
   }
   items(userId: string): Item[] {
+    if (this.isUserDeleted(userId)) return [];
     return this.db
       .prepare("SELECT data FROM items WHERE user_id=?")
       .all(userId)
       .map((r) => JSON.parse(r.data as string));
   }
   overrides(userId: string): Override[] {
+    if (this.isUserDeleted(userId)) return [];
     return this.db
       .prepare("SELECT data FROM overrides WHERE user_id=?")
       .all(userId)
       .map((r) => JSON.parse(r.data as string));
   }
   item(id: string, userId: string): Item {
+    if (this.isUserDeleted(userId)) throw new HttpError(404, "일정을 찾을 수 없습니다.");
     const row = this.db
       .prepare("SELECT data FROM items WHERE id=? AND user_id=?")
       .get(id, userId);
@@ -232,6 +270,7 @@ export class Store {
     return JSON.parse(row.data as string);
   }
   save(item: Item, userId: string) {
+    if (this.isUserDeleted(userId)) throw new HttpError(401, "탈퇴한 계정입니다.");
     this.db
       .prepare(
         "INSERT INTO items VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
@@ -239,6 +278,7 @@ export class Store {
       .run(item.id, JSON.stringify(item), userId);
   }
   saveOverride(o: Override, userId: string) {
+    if (this.isUserDeleted(userId)) throw new HttpError(401, "탈퇴한 계정입니다.");
     this.db
       .prepare(
         "INSERT INTO overrides VALUES(?,?,?,?) ON CONFLICT(item_id,key) DO UPDATE SET data=excluded.data",
@@ -468,6 +508,7 @@ export class Store {
     }
   }
   trash(userId: string) {
+    if (this.isUserDeleted(userId)) return [];
     this.cleanup();
     return this.db
       .prepare(
@@ -476,6 +517,7 @@ export class Store {
       .all(userId);
   }
   restore(userId: string, id: string) {
+    if (this.isUserDeleted(userId)) throw new HttpError(404, "복구할 수 없는 계정입니다.");
     return this.transaction(() => {
       const row = this.db
         .prepare("SELECT * FROM trash WHERE id=? AND user_id=?")
@@ -559,16 +601,16 @@ export class Store {
   cleanup() {
     const now = Date.now();
     this.db
-      .prepare("DELETE FROM agent_requests WHERE created_at<?")
+      .prepare("DELETE FROM agent_requests WHERE key_id NOT IN (SELECT k.id FROM agent_keys k JOIN users u ON u.id=k.user_id WHERE u.deleted_at IS NOT NULL) AND created_at<?")
       .run(now - 7 * DAY);
     this.db
-      .prepare("DELETE FROM agent_audit WHERE created_at<?")
+      .prepare("DELETE FROM agent_audit WHERE key_id NOT IN (SELECT k.id FROM agent_keys k JOIN users u ON u.id=k.user_id WHERE u.deleted_at IS NOT NULL) AND created_at<?")
       .run(now - 30 * DAY);
     this.db.exec(
-      "DELETE FROM agent_audit WHERE id IN (SELECT id FROM agent_audit ORDER BY created_at DESC LIMIT -1 OFFSET 10000)",
+      "DELETE FROM agent_audit WHERE id IN (SELECT id FROM agent_audit WHERE key_id NOT IN (SELECT k.id FROM agent_keys k JOIN users u ON u.id=k.user_id WHERE u.deleted_at IS NOT NULL) ORDER BY created_at DESC LIMIT -1 OFFSET 10000)",
     );
-    this.db.prepare("DELETE FROM trash WHERE deleted_at<?").run(now - 30 * DAY);
-    for (const row of this.db.prepare("SELECT id,data FROM items").all() as {
+    this.db.prepare("DELETE FROM trash WHERE user_id NOT IN (SELECT id FROM users WHERE deleted_at IS NOT NULL) AND deleted_at<?").run(now - 30 * DAY);
+    for (const row of this.db.prepare("SELECT id,data FROM items WHERE user_id NOT IN (SELECT id FROM users WHERE deleted_at IS NOT NULL)").all() as {
       id: string;
       data: string;
     }[]) {
@@ -576,13 +618,13 @@ export class Store {
       if (item.deletedAt && Date.parse(item.deletedAt) < now - 30 * DAY)
         this.db.prepare("DELETE FROM items WHERE id=?").run(item.id);
     }
-    this.db.prepare("DELETE FROM sessions WHERE expires<?").run(now);
+    this.db.prepare("DELETE FROM sessions WHERE user_id NOT IN (SELECT id FROM users WHERE deleted_at IS NOT NULL) AND expires<?").run(now);
     this.db.prepare("DELETE FROM oauth WHERE expires<?").run(now);
-    this.db.prepare("DELETE FROM mcp_oauth WHERE expires<=?").run(now);
-    this.db.prepare("DELETE FROM deliveries WHERE due<?").run(now - 30 * DAY);
+    this.db.prepare("DELETE FROM mcp_oauth WHERE coalesce(json_extract(data,'$.keyId'),'') NOT IN (SELECT k.id FROM agent_keys k JOIN users u ON u.id=k.user_id WHERE u.deleted_at IS NOT NULL) AND coalesce(json_extract(data,'$.session'),'') NOT IN (SELECT s.hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE u.deleted_at IS NOT NULL) AND expires<=?").run(now);
+    this.db.prepare("DELETE FROM deliveries WHERE user_id IN (SELECT id FROM users WHERE deleted_at IS NULL) AND due<?").run(now - 30 * DAY);
     this.db
       .prepare(
-        "DELETE FROM invites WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at<?",
+        "DELETE FROM invites WHERE id NOT IN (SELECT invite_id FROM invite_uses) AND created_by NOT IN (SELECT id FROM users WHERE deleted_at IS NOT NULL) AND used_at IS NULL AND revoked_at IS NULL AND expires_at<?",
       )
       .run(now - 30 * DAY);
   }

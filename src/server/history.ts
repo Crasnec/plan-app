@@ -76,6 +76,9 @@ export class History {
     this.prune();
     return value;
   }
+  forget(session: string) {
+    this.sessions.delete(session);
+  }
   state(session: string) {
     this.prune();
     const stack = this.sessions.get(session);
