@@ -125,7 +125,7 @@ npm run keys
 - 삭제 범위가 겹쳤다면 상위 시리즈 또는 최근 삭제 범위를 먼저 복구해야 할 수 있습니다. 복구 충돌을 자동 덮어쓰기하지 않습니다.
 - 초기 입력 범위는 1970~2200년, 한 일정의 기간은 최대 366일, 조회는 최대 100일입니다.
 
-## Docker와 Caddy
+## Docker 배포
 
 ```sh
 cp .env.example .env
@@ -133,7 +133,7 @@ cp .env.example .env
 sudo -n docker compose up -d --build
 ```
 
-Caddy와 공유하는 Docker 네트워크 이름을 `CADDY_NETWORK`에 지정합니다. `deploy/Caddyfile.example`의 사이트 블록을 기존 Caddy 설정에 추가하고 해당 Caddy 구성에 맞춰 reload 합니다. 앱 포트는 호스트에 공개하지 않습니다.
+외부 HTTPS 프록시와 공유하는 Docker 네트워크 이름을 `CADDY_NETWORK`에 지정합니다. 프록시의 설정과 인증서 저장소는 애플리케이션 Git 저장소 밖에서 별도로 운영합니다. 프록시는 공유 네트워크에서 앱의 `plan-app:3000`으로 연결하며, 앱 포트는 호스트에 공개하지 않습니다. 이 저장소의 Compose는 앱만 실행합니다.
 
 앱은 비루트 사용자, 읽기 전용 루트 파일시스템, 데이터·백업 볼륨으로 실행합니다. SQLite는 단일 앱 인스턴스에서 사용합니다. 데이터와 WAL 파일은 `plan-data` 볼륨에 보관합니다. 초기 스키마 버전은 `migrations` 테이블에 기록됩니다. 후속 스키마 변경은 명시적 버전 마이그레이션으로 추가해야 합니다.
 
@@ -163,19 +163,16 @@ PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/browser-sm
 
 2026-09-10 기준 타입 검사와 테스트 41개, 운영 도메인의 HTTPS 응답·OAuth 시작 리디렉션·미인증 API 접근 차단을 확인했습니다. Google 계정의 실제 로그인 완료와 PC/안드로이드에서 앱을 닫은 상태의 알림 전달은 사용자 기기에서 추가 확인해야 합니다. 로컬 테스트 통과가 모든 운영 환경의 동작을 보증하지는 않습니다.
 
-## 전용 Caddy로 배포
-
-80/443 포트를 사용하는 기존 프록시가 없는 서버에서만 다음 구성을 사용합니다. 기존 Caddy가 있다면 `compose.yaml`만 실행하고 `deploy/Caddyfile.example`의 사이트를 기존 프록시에 추가합니다.
+## 로컬 운영 환경 설정
 
 ```sh
 # 각 파일에는 OAuth 값 하나만 넣습니다. 원본과 .env는 Git/Docker에서 제외됩니다.
 npm ci
 node scripts/configure-local.mjs
-sudo -n docker network create caddy # 이미 존재하면 생략
-sudo -n docker compose -f compose.yaml -f compose.edge.yaml up -d --build --wait
+sudo -n docker compose up -d --build --wait
 ```
 
-`configure-local.mjs`는 로컬 `oauth-id.txt`·`oauth-secret.txt`를 읽어 권한 0600의 `.env`를 생성하고 VAPID 키를 생성합니다. 기존 `.env`는 덮어쓰지 않습니다. Google 콘솔의 승인된 리디렉션 URI는 `https://plan.crasnec.com/auth/google/callback`입니다. DNS가 서버를 가리키고 외부 TCP 80/443이 도달해야 HTTPS 인증서가 발급됩니다. DB·백업·인증서 볼륨은 재배포 시 유지해야 합니다.
+`configure-local.mjs`는 로컬 `oauth-id.txt`·`oauth-secret.txt`를 읽어 권한 0600의 `.env`를 생성하고 VAPID 키를 생성합니다. 기존 `.env`는 덮어쓰지 않습니다. 공유 Docker 네트워크와 HTTPS 라우팅은 외부 프록시 운영 경로에서 준비합니다. Google 콘솔의 승인된 리디렉션 URI는 `https://plan.crasnec.com/auth/google/callback`입니다. DB·백업 볼륨은 재배포 시 유지해야 합니다.
 
 ## 에이전트 API와 보안 감사
 
@@ -201,7 +198,6 @@ src/server/       Express API, 인증, SQLite 저장소, 알림
 src/shared/       날짜·반복 규칙과 시간표 배치 로직
 tests/            도메인·서버·에이전트 API·보안 회귀 테스트
 scripts/          빌드, 백업, 로컬 설정, 브라우저 검사와 캡처
-deploy/           Caddy 설정과 이미지
 docs/screenshots/ README에 사용하는 데모 화면
 ```
 

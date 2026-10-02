@@ -11,3 +11,10 @@ credentials*.json
 *.key
 .git
 artifacts
+
+# Reverse proxy operations belong outside this repository.
+**/[Cc]addyfile*
+**/*.[Cc]addy
+**/[Cc]addy/
+compose.edge*.yaml
+compose.edge*.yml

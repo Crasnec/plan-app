@@ -101,7 +101,6 @@ plan-app/
   apps/server/       API, 인증, 반복 계산, 알림 작업
   packages/domain/   공통 타입과 날짜·반복 도메인 로직
   migrations/       SQLite 마이그레이션
-  deploy/           Docker 및 Caddy 설정 예시
 ```
 
 - 서버 프레임워크, 데이터 접근 계층, 달력·반복 라이브러리는 구현 전에 유지보수 상태와 라이선스, React 연동, 필요한 반복 규칙 지원을 확인한 뒤 선택한다.
